@@ -1,0 +1,27 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!DOCTYPE hibernate-configuration PUBLIC
+        "-//Hibernate/Hibernate Configuration DTD//EN"
+        "http://hibernate.org/dtd/hibernate-configuration-3.0.dtd">
+<hibernate-configuration>
+    <session-factory>
+
+        <!-- Подключение к БД -->
+        <property name="hibernate.connection.driver_class">org.postgresql.Driver</property>
+        <property name="hibernate.connection.url">jdbc:postgresql://localhost:5432/AdaptixBot</property>
+        <property name="hibernate.connection.username">postgres</property>
+        <property name="hibernate.connection.password"></property>
+
+        <!-- Автоматическое создание таблиц -->
+        <property name="hibernate.hbm2ddl.auto">update</property>
+
+        <!-- Логгирование -->
+        <property name="hibernate.show_sql">true</property>
+        <property name="hibernate.format_sql">true</property>
+
+        <!-- Указываем классы-сущности -->
+        <mapping class="org.example.table.Photo"/>
+        <mapping class="org.example.table.Product"/>
+        <mapping class="org.example.table.Purchase"/>
+        <mapping class="org.example.table.User"/>
+    </session-factory>
+</hibernate-configuration>
