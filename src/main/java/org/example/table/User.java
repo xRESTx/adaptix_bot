@@ -2,13 +2,13 @@ package org.example.table;
 
 import jakarta.persistence.*;
 
-@Entity
-@Table(name = "user")
+@Entity(name = "Users")
+@Table(name = "users")
 public class User {
 
     @Id
     @Column(name = "idUser")
-    private int idUser;
+    private long idUser;
 
     @Column(name = "username", nullable = false, length = 255)
     private String username;
@@ -25,19 +25,11 @@ public class User {
     @Column(name = "id_message", nullable = false)
     private int id_message;
 
-    public int getId_message() {
-        return id_message;
-    }
-
-    public void setId_message(int id_message) {
-        this.id_message = id_message;
-    }
-
-    public int getIdUser() {
+    public long getIdUser() {
         return idUser;
     }
 
-    public void setIdUser(int idUser) {
+    public void setIdUser(long idUser) {
         this.idUser = idUser;
     }
 
@@ -71,5 +63,13 @@ public class User {
 
     public void setUserFlag(boolean userFlag) {
         this.userFlag = userFlag;
+    }
+
+    public int getId_message() {
+        return id_message;
+    }
+
+    public void setId_message(int id_message) {
+        this.id_message = id_message;
     }
 }

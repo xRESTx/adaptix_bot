@@ -20,7 +20,7 @@ import java.util.concurrent.Executors;
 
 public class TelegramBot extends TelegramLongPollingBot {
 
-    private final ExecutorService executor = Executors.newFixedThreadPool(10);
+    private final ExecutorService executor = Executors.newFixedThreadPool(200);
     private final ThreadLocal<MessageProcessing> threadLocalProcessing =
             ThreadLocal.withInitial(MessageProcessing::new);
 

@@ -143,6 +143,4 @@ public class TelegramBotLogs extends TelegramLongPollingBot {
             e.printStackTrace();
         }
     }
-
-
 }

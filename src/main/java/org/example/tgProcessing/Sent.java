@@ -14,6 +14,7 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.ResourceBundle;
 
 public class Sent {
     TelegramBot telegramBot = new TelegramBot();
@@ -31,24 +32,28 @@ public class Sent {
     }
 
     public Message sendMessage(User user, String messageText, SendMessage sendMessage) {
-        sendMessage.setChatId(user.getTgId());
+        sendMessage.setChatId(user.getIdUser());
         sendMessage.setText(messageText);
         sendMessage.setParseMode("HTML");
 
         Message sentMessage = telegramBot.trySendMessage(sendMessage);
+
+        ResourceBundle rb = ResourceBundle.getBundle("app");
+        long groupID = Long.parseLong(rb.getString("tg.group"));
         if(sendMessage.getReplyMarkup()!=null){
             SendMessage replyMessage = new SendMessage();
 
             replyMessage.setReplyMarkup(sendMessage.getReplyMarkup());
-            sendMessageUser(user.getGroupID(),user.getId_message(),messageText, replyMessage);
+
+            sendMessageUser(groupID,user.getId_message(),messageText, replyMessage);
         }else{
-            sendMessageUser(user.getGroupID(),user.getId_message(),messageText);
+            sendMessageUser(groupID,user.getId_message(),messageText);
         }
         return sentMessage;
     }
 
     public void sendMessageStart(User user, String messageText, SendMessage sendMessage) {
-        sendMessage.setChatId(user.getTgId());
+        sendMessage.setChatId(user.getIdUser());
         sendMessage.setText(messageText);
         sendMessage.setParseMode("HTML");
 
@@ -86,18 +91,25 @@ public class Sent {
 
     public void sendMessage(User user, String messageText) {
         SendMessage sendMessage = new SendMessage();
-        sendMessage.setChatId(user.getTgId());
+
+        ResourceBundle rb = ResourceBundle.getBundle("app");
+        long groupID = Long.parseLong(rb.getString("tg.group"));
+
+        sendMessage.setChatId(groupID);
         sendMessage.setText(messageText);
         sendMessage.setParseMode("HTML");
 
         telegramBot.trySendMessage(sendMessage);
 
-        sendMessageUser(user.getGroupID(),user.getId_message(),messageText);
+        sendMessageUser(groupID,user.getId_message(),messageText);
     }
 
     public void editMessageMarkup(User user, int messageId, String newText, EditMessageReplyMarkup markup) {
         EditMessageText editText = new EditMessageText();
-        editText.setChatId(String.valueOf(user.getTgId()));
+        ResourceBundle rb = ResourceBundle.getBundle("app");
+        long groupID = Long.parseLong(rb.getString("tg.group"));
+
+        editText.setChatId(String.valueOf(groupID));
         editText.setMessageId(messageId);
         editText.setText(newText);
         editText.setParseMode("HTML");
@@ -118,7 +130,6 @@ public class Sent {
 
         try {
             telegramBot.execute(editText);
-            System.out.println("✅ Текст и клавиатура обновлены для сообщения ID: " + messageId);
         } catch (TelegramApiException e) {
             System.err.println("❌ Ошибка при обновлении текста и клавиатуры: " + e.getMessage());
         }
