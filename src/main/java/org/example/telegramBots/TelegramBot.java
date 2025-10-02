@@ -1,17 +1,28 @@
 package org.example.telegramBots;
 
 
+import org.example.session.ProductCreationSession;
+import org.example.session.SessionStore;
+import org.example.table.User;
 import org.example.tgProcessing.MessageProcessing;
-import org.example.tgProcessing.Sent;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.CopyMessage;
+import org.telegram.telegrambots.meta.api.methods.GetFile;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
+import org.telegram.telegrambots.meta.api.objects.File;
+import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.URL;
+import java.nio.channels.Channels;
+import java.nio.channels.ReadableByteChannel;
 import java.util.List;
 import java.util.Objects;
 import java.util.ResourceBundle;
@@ -39,7 +50,8 @@ public class TelegramBot extends TelegramLongPollingBot {
                         messageProcessing.callBackQuery(update);
                         return;
                     }
-                    if(update.hasMessage() && update.getMessage().hasText()){
+                    if ((update.hasMessage() && update.getMessage().hasText())
+                            || (SessionStore.getProductSession(update.getMessage().getChatId()).getStep() == ProductCreationSession.Step.PHOTO)) {
                         messageProcessing.handleUpdate(update);
                         return;
                     }
@@ -83,12 +95,44 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
         return null;
     }
+    public void downloadFile(String fileId, String filePath) throws TelegramApiException, IOException {
+        GetFile getFile = new GetFile();
+        getFile.setFileId(fileId);
+
+        File file = execute(getFile);
+
+        URL fileUrl = new URL(file.getFileUrl(getBotToken()));
+
+        try (InputStream in = fileUrl.openStream();
+             ReadableByteChannel rbc = Channels.newChannel(in);
+             FileOutputStream fos = new FileOutputStream(filePath)) {
+            fos.getChannel().transferFrom(rbc, 0, Long.MAX_VALUE);
+        }
+    }
 
     public void trySendMessage(CopyMessage sendMessage) {
         boolean sent = false;
         while (!sent) {
             try {
                 execute(sendMessage);
+                sent = true;
+            } catch (TelegramApiException e) {
+                System.err.println("❌ Failed to send: " + e.getMessage());
+                int retryAfterSeconds = extractRetryAfterSeconds(e.getMessage());
+                try {
+                    Thread.sleep((retryAfterSeconds > 0 ? retryAfterSeconds : 1) * 1000L);
+                } catch (InterruptedException ex) {
+                    ex.printStackTrace();
+                    break;
+                }
+            }
+        }
+    }
+    public void trySendPhoto(SendPhoto sendPhoto) {
+        boolean sent = false;
+        while (!sent) {
+            try {
+                execute(sendPhoto);
                 sent = true;
             } catch (TelegramApiException e) {
                 System.err.println("❌ Failed to send: " + e.getMessage());

@@ -5,13 +5,16 @@ import org.example.table.User;
 import org.example.telegramBots.TelegramBotLogs;
 import org.telegram.telegrambots.meta.api.methods.CopyMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageReplyMarkup;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
+import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.ResourceBundle;
@@ -95,7 +98,7 @@ public class Sent {
         ResourceBundle rb = ResourceBundle.getBundle("app");
         long groupID = Long.parseLong(rb.getString("tg.group"));
 
-        sendMessage.setChatId(groupID);
+        sendMessage.setChatId(user.getIdUser());
         sendMessage.setText(messageText);
         sendMessage.setParseMode("HTML");
 
@@ -104,12 +107,10 @@ public class Sent {
         sendMessageUser(groupID,user.getId_message(),messageText);
     }
 
-    public void editMessageMarkup(User user, int messageId, String newText, EditMessageReplyMarkup markup) {
+    public void editMessageMarkup(User user, Integer messageId, String newText, EditMessageReplyMarkup markup) {
         EditMessageText editText = new EditMessageText();
-        ResourceBundle rb = ResourceBundle.getBundle("app");
-        long groupID = Long.parseLong(rb.getString("tg.group"));
 
-        editText.setChatId(String.valueOf(groupID));
+        editText.setChatId(String.valueOf(user.getIdUser()));
         editText.setMessageId(messageId);
         editText.setText(newText);
         editText.setParseMode("HTML");
@@ -133,5 +134,25 @@ public class Sent {
         } catch (TelegramApiException e) {
             System.err.println("❌ Ошибка при обновлении текста и клавиатуры: " + e.getMessage());
         }
+    }
+    public void sendPhoto(long chatId, String filePath, String caption) {
+        // Создаем объект SendPhoto
+        SendPhoto sendPhoto = new SendPhoto();
+        sendPhoto.setChatId(chatId);
+        sendPhoto.setCaption(caption);
+
+        // Проверяем, что файл существует
+        File file = new File(filePath);
+        if (!file.exists()) {
+            System.out.println("File does not exist: " + filePath);
+            return;
+        }
+
+        // Создаем объект InputFile и загружаем файл
+        InputFile inputFile = new InputFile(file);
+        sendPhoto.setPhoto(inputFile);
+
+        // Отправляем фотографию с использованием метода trySendPhoto
+        telegramBot.trySendPhoto(sendPhoto);
     }
 }

@@ -26,11 +26,22 @@ public class Product {
     @Column(name = "numberParticipants", nullable = false)
     private int numberParticipants;
 
-    @Column(name = "number of participants", nullable = false)
+    @Column(name = "numberOfParticipants", nullable = false)
     private int numberOfParticipants;
 
     @Column(name = "additionalСonditions", nullable = false, columnDefinition = "text")
     private String additionalСonditions;
+
+    @Column(name = "photo", nullable = false)
+    private String photo;
+
+    public String getPhoto() {
+        return photo;
+    }
+
+    public void setPhoto(String photo) {
+        this.photo = photo;
+    }
 
     public int getIdProduct() {
         return idProduct;
