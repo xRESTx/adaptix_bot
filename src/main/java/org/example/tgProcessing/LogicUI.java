@@ -1,6 +1,8 @@
 package org.example.tgProcessing;
 
+import org.example.dao.ProductDAO;
 import org.example.dao.UserDAO;
+import org.example.table.Product;
 import org.example.table.User;
 import org.example.telegramBots.TelegramBotLogs;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
@@ -13,6 +15,7 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKe
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public class LogicUI {
@@ -33,7 +36,7 @@ public class LogicUI {
         row2.add("Получить кешбек");
 
         KeyboardRow row3 = new KeyboardRow();
-        if(user.isAdmin()) {
+        if(user!=null && user.isAdmin()) {
             row3.add("Админ меню");
         }
         ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
@@ -43,6 +46,7 @@ public class LogicUI {
         SendMessage sendMessage = new SendMessage();
 
         sendMessage.setReplyMarkup(keyboardMarkup);
+
         if(user==null){
             user = new User();
             user.setIdUser(chatId);
@@ -60,13 +64,14 @@ public class LogicUI {
         }
     }
 
-    public void sendAdminMenu(User user){
+    public void sendAdminMenu(User user, Integer messageId){
         Sent sent = new Sent();
         if(user.isAdmin()){
-            SendMessage sendMessage = new SendMessage();
-            Message sentMessage = sent.sendMessage(user,"Выберите действие Меню",sendMessage);
-            int messageId = sentMessage.getMessageId();
-
+            if(messageId==null){
+                SendMessage sendMessage = new SendMessage();
+                Message sentMessage = sent.sendMessage(user,"Выберите действие Меню",sendMessage);
+                messageId = sentMessage.getMessageId();
+            }
             List<InlineKeyboardButton> row1 = new ArrayList<>();
             List<InlineKeyboardButton> row2 = new ArrayList<>();
             InlineKeyboardButton btnAddAdmin = new InlineKeyboardButton();
@@ -104,5 +109,114 @@ public class LogicUI {
 
             sent.editMessageMarkup(user,messageId,"Выберите действие: Админ меню",editMarkup);
         }
+    }
+    public void sendProducts(User user){
+        Sent sent = new Sent();
+        SendMessage sendMessage = new SendMessage();
+        ProductDAO productDAO = new ProductDAO();
+
+        Message sentMessage = sent.sendMessage(user,"📦 Выберите товар:",sendMessage);
+        int messageId = sentMessage.getMessageId();
+
+        List<Product> products = (user.isAdmin() && user.isUserFlag())
+                ? productDAO.findAllVisible()
+                : productDAO.findAll();
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+
+        for(Product product : products){
+            InlineKeyboardButton button = new InlineKeyboardButton();
+            button.setText("Товар:" + product.getProductName() + "  " + product.getCashbackPercentage() + "%");
+            button.setCallbackData("product_:" + product.getIdProduct() + ":" + messageId);
+            rows.add(List.of(button));
+        }
+        if(user.isAdmin() && !user.isUserFlag()){
+            InlineKeyboardButton addProduct = new InlineKeyboardButton("Добавить товар");
+            addProduct.setCallbackData("addProduct_");
+            rows.add(List.of(addProduct));
+        }
+        InlineKeyboardButton back = new InlineKeyboardButton("⬅️ Назад");
+        back.setCallbackData("Menu:" + messageId);
+        rows.add(List.of(back));
+
+        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+        markup.setKeyboard(rows);
+
+        EditMessageReplyMarkup editMarkup = new EditMessageReplyMarkup();
+        editMarkup.setChatId(user.getIdUser());
+        editMarkup.setMessageId(messageId);
+        editMarkup.setReplyMarkup(markup);
+
+        sent.editMessageMarkup(user, messageId, "📦 Выберите тариф:", editMarkup);
+    }
+    public void sentOneProduct(User user, Product selected, int messageId){
+        Sent sent = new Sent();
+        String textProduct =
+                "Вы выбрали товар: "+ selected.getProductName() + " \n" +
+                        "\n" +
+                        "Кешбек " + selected.getCashbackPercentage() +  "% после публикации отзыва \uD83D\uDE4F\n" +
+                        "Принимаем только карты Сбера (Россия)\n" +
+                        "\n" +
+                        "Условия участия:\n" +
+                        "- Подпишитесь на наш канал @adaptix_focus \uD83D\uDE09\n" +
+                        "- Включите запись экрана (мы её можем запросить)\n" +
+                        "- Найдите наш товар по запросу \""+ selected.getKeyQuery() +"\" \uD83D\uDD0E\n" +
+                        "- Закажите товар и заполните заявку\n" +
+                        "- Заберите товар с ПВЗ в течении 3 дней\uD83D\uDC4D\n" +
+                        "- Согласуйте свой отзыв с фотографиями в нашем боте\n" +
+                        "- Оставьте свой отзыв и заполните форму получения кешбека (только когда отзыв опубликовали)\n" +
+                        "- Кешбек ВЫПЛАЧИВАЕТСЯ В ПН И ПТ\uD83D\uDCB3\n" +
+                        "\n" +
+                        "Важно:\n" +
+                        "- Участвовать можно только в одной раздаче на один аккаунт не чаще чем раз в две недели\n" +
+                        "- ФИО в заказе должно совпадать с номером карты\uD83D\uDC64\n" +
+                        "- Качественные фотографии в отзыве обязательны\uD83D\uDCF8\n" +
+                        "- Отзыв нужно оставить не позднее 3 дней после забора товара с ПВЗ \uD83D\uDCC5\n" +
+                        "- Желающие возвращать товар на ПВЗ не могут участвовать в акции \uD83D\uDEAB";
+        List<List<InlineKeyboardButton>> keyboard = new ArrayList<>();
+        if(messageId!=0){
+            InlineKeyboardButton back = new InlineKeyboardButton("⬅️ Назад");
+            back.setCallbackData("back_tariffs:" + messageId);
+            keyboard.add(List.of(back));
+        }
+        if(!user.isUserFlag() && user.isAdmin()){
+            InlineKeyboardButton name = new InlineKeyboardButton("Наименование");
+            name.setCallbackData("update_tariffs_name_" + selected.getIdProduct());
+
+            InlineKeyboardButton description = new InlineKeyboardButton("Описание");
+            description.setCallbackData("update_tariffs_description_" + selected.getIdProduct());
+
+            InlineKeyboardButton price = new InlineKeyboardButton("Стоимость");
+            price.setCallbackData("update_tariffs_price_" + selected.getIdProduct());
+
+            InlineKeyboardButton term = new InlineKeyboardButton("Продолжительность");
+            term.setCallbackData("update_tariffs_term_" + selected.getIdProduct());
+
+            InlineKeyboardButton discount = new InlineKeyboardButton("Скидка");
+            discount.setCallbackData("update_tariffs_discount_" + selected.getIdProduct());
+
+            InlineKeyboardButton visible;
+            if(selected.isVisible()){
+                visible = new InlineKeyboardButton("Видим ✅");
+            }else{
+                visible = new InlineKeyboardButton("Невидим ️⚠️");
+            }
+            visible.setCallbackData("changeVisible_" + selected.getIdProduct());
+            keyboard.add(Arrays.asList(name,description,price,term,discount,visible));
+        } else {
+            InlineKeyboardButton buy = new InlineKeyboardButton("✅ Купить");
+            buy.setCallbackData("buy_tariffs_:" + selected.getIdProduct());
+            keyboard.add(List.of(buy));
+        }
+
+        InlineKeyboardMarkup inlineMarkup = new InlineKeyboardMarkup();
+        inlineMarkup.setKeyboard(keyboard);
+
+        EditMessageReplyMarkup editMarkup = new EditMessageReplyMarkup();
+        editMarkup.setChatId(String.valueOf(user.getIdUser()));
+        editMarkup.setMessageId(messageId);
+        editMarkup.setReplyMarkup(inlineMarkup);
+
+        // 4. Вызываем имеющийся метод
+        sent.editMessageMarkup(user, messageId, textProduct, editMarkup);
     }
 }

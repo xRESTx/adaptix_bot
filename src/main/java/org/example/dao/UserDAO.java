@@ -5,6 +5,7 @@ import org.hibernate.Session;
 import org.hibernate.SessionFactory;
 import org.hibernate.Transaction;
 import org.hibernate.cfg.Configuration;
+import org.hibernate.query.Query;
 
 import java.util.List;
 
@@ -58,12 +59,50 @@ public class UserDAO {
             }
         });
     }
-
+    public void updateUserByTgId(long tgId, boolean user_flag) {
+        Transaction tx = null;
+        try (Session session = sessionFactory.openSession()) {
+            tx = session.beginTransaction();
+            Query<?> query = session.createQuery(
+                    "update Users set userFlag = :userFlag where idUser = :idUser"
+            );
+            query.setParameter("userFlag", user_flag);
+            query.setParameter("idUser", tgId);
+            query.executeUpdate();
+            tx.commit();
+        } catch (Exception e) {
+            if (tx != null) tx.rollback();
+        }
+    }
     public User findFirst() {
         try (Session session = sessionFactory.openSession()) {
             return session.createQuery("FROM Users", User.class)
                     .setMaxResults(1)
                     .uniqueResult();
+        }
+    }
+
+    public User findByUsername(String username) {
+        try (Session session = sessionFactory.openSession()) {
+            return session
+                    .createQuery("FROM Users WHERE username = :username", User.class)
+                    .setParameter("username", username)
+                    .uniqueResult();
+        }
+    }
+    public void updateAdminByTgId(long tgId, boolean admin) {
+        Transaction tx = null;
+        try (Session session = sessionFactory.openSession()) {
+            tx = session.beginTransaction();
+            Query<?> query = session.createQuery(
+                    "update Users set isAdmin = :isAdmin where idUser = :idUser"
+            );
+            query.setParameter("isAdmin", admin);
+            query.setParameter("idUser", tgId);
+            query.executeUpdate();
+            tx.commit();
+        } catch (Exception e) {
+            if (tx != null) tx.rollback();
         }
     }
 

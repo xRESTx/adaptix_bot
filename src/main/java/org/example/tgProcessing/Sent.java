@@ -120,7 +120,7 @@ public class Sent {
             finalMarkup = markup.getReplyMarkup();
         } else {
             InlineKeyboardButton btnExit = new InlineKeyboardButton();
-            btnExit.setText("Отмена");
+            btnExit.setText("Назад");
             btnExit.setCallbackData("Exit:" + messageId);
 
             finalMarkup = new InlineKeyboardMarkup();

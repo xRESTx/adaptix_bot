@@ -3,7 +3,6 @@ package org.example.telegramBots;
 
 import org.example.session.ProductCreationSession;
 import org.example.session.SessionStore;
-import org.example.table.User;
 import org.example.tgProcessing.MessageProcessing;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.CopyMessage;
@@ -12,7 +11,6 @@ import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.objects.File;
-import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
@@ -24,7 +22,6 @@ import java.net.URL;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.util.List;
-import java.util.Objects;
 import java.util.ResourceBundle;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -50,13 +47,17 @@ public class TelegramBot extends TelegramLongPollingBot {
                         messageProcessing.callBackQuery(update);
                         return;
                     }
+                    if(update.getMessage().hasPhoto()){
+                        if(SessionStore.getProductSession(update.getMessage().getChatId())!=null && SessionStore.getProductSession(update.getMessage().getChatId()).getStep() == ProductCreationSession.Step.PHOTO){
+                            messageProcessing.handleUpdate(update);
+                        }else{
+                            messageProcessing.sentPhotoUpdate(update);
+                        }
+                        return;
+                    }
                     if ((update.hasMessage() && update.getMessage().hasText())
                             || (SessionStore.getProductSession(update.getMessage().getChatId()).getStep() == ProductCreationSession.Step.PHOTO)) {
                         messageProcessing.handleUpdate(update);
-                        return;
-                    }
-                    if(update.getMessage().hasPhoto()){
-                        messageProcessing.sentPhotoUpdate(update);
                         return;
                     }
 

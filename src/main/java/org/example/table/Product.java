@@ -35,6 +35,17 @@ public class Product {
     @Column(name = "photo", nullable = false)
     private String photo;
 
+    @Column(name="visible", nullable = false)
+    private boolean visible;
+
+    public boolean isVisible() {
+        return visible;
+    }
+
+    public void setVisible(boolean visible) {
+        this.visible = visible;
+    }
+
     public String getPhoto() {
         return photo;
     }

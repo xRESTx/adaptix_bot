@@ -7,26 +7,18 @@ import org.example.session.SessionStore;
 import org.example.table.Product;
 import org.example.table.User;
 import org.example.telegramBots.TelegramBot;
-import org.telegram.telegrambots.meta.api.methods.GetFile;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.PhotoSize;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.URL;
-import java.nio.channels.Channels;
-import java.nio.channels.ReadableByteChannel;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.ResourceBundle;
-
-import static org.apache.commons.io.FileUtils.getFile;
 
 public class MessageProcessing {
 
@@ -39,11 +31,11 @@ public class MessageProcessing {
             User user = userDAO.findByIdMessage(threadID);
             sent.sendPhoto(user.getIdUser(), null, chatId, update.getMessage().getMessageId());
         } else {
-            User people = userDAO.findById(chatId);
+            User user = userDAO.findById(chatId);
             ResourceBundle rb = ResourceBundle.getBundle("app");
             long groupID = Long.parseLong(rb.getString("tg.group"));
 
-            sent.sendPhoto(groupID, people.getId_message(), chatId, update.getMessage().getMessageId());
+            sent.sendPhoto(groupID, user.getId_message(), chatId, update.getMessage().getMessageId());
         }
     }
 
@@ -56,6 +48,9 @@ public class MessageProcessing {
 
         String msg = update.getMessage().getText();
         long chatId = update.getMessage().getChatId();
+        if (String.valueOf(chatId).startsWith("-100")) {
+            return;
+        }
         UserDAO userDAO = new UserDAO();
         Integer threadID = update.getMessage().getMessageThreadId();
         if (threadID != null) {
@@ -131,10 +126,38 @@ public class MessageProcessing {
                     }
                 }
             }
+            if(state.startsWith("addAdmin_")){
+                String find = msg.replace("@","");
+                User userFind = userDAO.findByUsername(find);
+                if(userFind!=null){
+                    if(userFind.getIdUser() == user.getIdUser()){
+                        createTelegramBot.sendMessage(userFind,"Самого себя разжаловать нельзя(");
+                    }else {
+                        if(!userFind.isAdmin()){
+                            userDAO.updateAdminByTgId(userFind.getIdUser(),true);
+                            createTelegramBot.sendMessage(user,"Админ добавлен");
+                            createTelegramBot.sendMessage(userFind,"Вы новый администратор");
+                            logicUI.sendAdminMenu(userFind,null);
+
+                        }else {
+                            userDAO.updateAdminByTgId(userFind.getIdUser(),false);
+                            createTelegramBot.sendMessage(user,"Админ удален");
+                            createTelegramBot.sendMessage(userFind,"Вы разжалованы");
+                            logicUI.sendStart(userFind.getIdUser(),update);
+                        }
+                    }
+                }else {
+                    createTelegramBot.sendMessage(user,"Человека с таким именем в БД не найдено");
+                }
+
+                SessionStore.removeState(chatId);
+                return;
+            }
         }
         switch (msg) {
             case "/start" -> logicUI.sendStart(chatId, update);
-            case "Админ меню" -> logicUI.sendAdminMenu(user);
+            case "Админ меню" -> logicUI.sendAdminMenu(user,null);
+            case "Каталог товаров" -> logicUI.sendProducts(user);
         }
     }
 
@@ -201,6 +224,23 @@ public class MessageProcessing {
         UserDAO userDAO = new UserDAO();
         User user = userDAO.findById(chatId);
 
+        if(data.startsWith("product_")){
+            ProductDAO productDAO = new ProductDAO();
+            String[] parts = data.split(":");
+            Product selected = productDAO.findById(Integer.parseInt(parts[1]));
+            logicUI.sentOneProduct(user,selected, Integer.parseInt(parts[2]));
+        } else if (data.startsWith("changeVisible_")) {
+            int productId = Integer.parseInt(data.substring("changeVisible_".length()));
+            ProductDAO productDAO = new ProductDAO();
+            Product product = productDAO.findById(productId);
+            boolean visible = product.isVisible();
+            productDAO.updateVisibleById(productId,!visible);
+            if(visible){
+                createTelegramBot.sendMessage(user,"Товар теперь невидим");
+            }else {
+                createTelegramBot.sendMessage(user,"Товар теперь видим");
+            }
+        }
         if (data.contains(":")) {
             String[] parts = data.split(":", 2);
             String command = parts[0];
@@ -208,6 +248,7 @@ public class MessageProcessing {
             switch (command) {
                 case "addAdmin": {
                     if (user.isAdmin()) {
+                        SessionStore.setState(chatId,"addAdmin_");
                         createTelegramBot.editMessageMarkup(user, Integer.parseInt(messageID), "Отправьте тег (Например @qwerty123)", null);
                     }
                     break;
@@ -220,6 +261,20 @@ public class MessageProcessing {
                         createTelegramBot.sendMessage(user, "Отправьте артикуль товара:");
                     } else {
                         createTelegramBot.sendMessage(user, "У вас нет прав для добавления товара.");
+                    }
+                    break;
+                }
+                case "isUser":{
+                    if(user.isAdmin()){
+                        userDAO.updateUserByTgId(chatId,!user.isUserFlag());
+                        user.setUserFlag(!user.isUserFlag());
+                        logicUI.sendAdminMenu(user, Integer.parseInt(messageID));
+                    }
+                    break;
+                }
+                case "Exit":{
+                    if(user.isAdmin()){
+                        logicUI.sendAdminMenu(user, Integer.parseInt(messageID));
                     }
                     break;
                 }
