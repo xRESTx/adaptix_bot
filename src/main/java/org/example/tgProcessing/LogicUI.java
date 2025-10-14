@@ -17,6 +17,7 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.Keyboard
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.Consumer;
 
 public class LogicUI {
 
@@ -94,7 +95,6 @@ public class LogicUI {
                 btnIsAdmin.setCallbackData("isUser:" + messageId);
                 row2.add(btnIsAdmin);
             }
-
             List<List<InlineKeyboardButton>> keyboard = new ArrayList<>();
             keyboard.add(row1);
             keyboard.add(row2);
@@ -110,17 +110,47 @@ public class LogicUI {
             sent.editMessageMarkup(user,messageId,"Выберите действие: Админ меню",editMarkup);
         }
     }
-    public void sendProducts(User user){
+    public void sendMenu(User user){
+        Sent sent = new Sent();
+
+        KeyboardRow row1 = new KeyboardRow();
+        row1.add("Каталог товаров");
+        row1.add("Оставить отзыв");
+
+        KeyboardRow row2 = new KeyboardRow();
+        row2.add("Техподдержка");
+        row2.add("Получить кешбек");
+
+        KeyboardRow row3 = new KeyboardRow();
+        if(user!=null && user.isAdmin()) {
+            row3.add("Админ меню");
+        }
+
+        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
+        keyboardMarkup.setKeyboard(List.of(row1,row2,row3));
+        keyboardMarkup.setResizeKeyboard(true);
+        keyboardMarkup.setOneTimeKeyboard(false);
+        SendMessage sendMessage = new SendMessage();
+
+        sendMessage.setReplyMarkup(keyboardMarkup);
+        sent.sendMessageStart(user, "Выберите действие Меню", sendMessage);
+    }
+
+    public void sendProducts(User user, Integer messageId){
         Sent sent = new Sent();
         SendMessage sendMessage = new SendMessage();
         ProductDAO productDAO = new ProductDAO();
 
-        Message sentMessage = sent.sendMessage(user,"📦 Выберите товар:",sendMessage);
-        int messageId = sentMessage.getMessageId();
-
         List<Product> products = (user.isAdmin() && user.isUserFlag())
                 ? productDAO.findAllVisible()
                 : productDAO.findAll();
+        if(products.isEmpty()){
+            sent.sendMessage(user,"К сожалению товаров на выкуп нет",sendMessage);
+            return;
+        }else if(messageId == null){
+            messageId = sent.sendMessage(user,"📦 Выберите товар:",sendMessage).getMessageId();
+        }
+
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
 
         for(Product product : products){
@@ -130,12 +160,13 @@ public class LogicUI {
             rows.add(List.of(button));
         }
         if(user.isAdmin() && !user.isUserFlag()){
-            InlineKeyboardButton addProduct = new InlineKeyboardButton("Добавить товар");
-            addProduct.setCallbackData("addProduct_");
-            rows.add(List.of(addProduct));
+            InlineKeyboardButton btnAddProduct = new InlineKeyboardButton();
+            btnAddProduct.setText("Добавить товар");
+            btnAddProduct.setCallbackData("addProduct:" + messageId);
+            rows.add(List.of(btnAddProduct));
         }
         InlineKeyboardButton back = new InlineKeyboardButton("⬅️ Назад");
-        back.setCallbackData("Menu:" + messageId);
+        back.setCallbackData("Exit:" + messageId);
         rows.add(List.of(back));
 
         InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
@@ -147,6 +178,22 @@ public class LogicUI {
         editMarkup.setReplyMarkup(markup);
 
         sent.editMessageMarkup(user, messageId, "📦 Выберите тариф:", editMarkup);
+    }
+    public void sendMessageBank(User user, String text){
+        Sent sent = new Sent();
+
+        KeyboardRow row1 = new KeyboardRow();
+        row1.add("Т-Банк");
+        row1.add("Сбер");
+
+        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
+        keyboardMarkup.setKeyboard(List.of(row1));
+        keyboardMarkup.setResizeKeyboard(true);
+        keyboardMarkup.setOneTimeKeyboard(false);
+        SendMessage sendMessage = new SendMessage();
+
+        sendMessage.setReplyMarkup(keyboardMarkup);
+        sent.sendMessageStart(user, text, sendMessage);
     }
     public void sentOneProduct(User user, Product selected, int messageId){
         Sent sent = new Sent();
@@ -175,7 +222,7 @@ public class LogicUI {
         List<List<InlineKeyboardButton>> keyboard = new ArrayList<>();
         if(messageId!=0){
             InlineKeyboardButton back = new InlineKeyboardButton("⬅️ Назад");
-            back.setCallbackData("back_tariffs:" + messageId);
+            back.setCallbackData("Exit:" + messageId);
             keyboard.add(List.of(back));
         }
         if(!user.isUserFlag() && user.isAdmin()){
@@ -204,7 +251,7 @@ public class LogicUI {
             keyboard.add(Arrays.asList(name,description,price,term,discount,visible));
         } else {
             InlineKeyboardButton buy = new InlineKeyboardButton("✅ Купить");
-            buy.setCallbackData("buy_tariffs_:" + selected.getIdProduct());
+            buy.setCallbackData("buy_product:" + selected.getIdProduct());
             keyboard.add(List.of(buy));
         }
 
@@ -216,7 +263,21 @@ public class LogicUI {
         editMarkup.setMessageId(messageId);
         editMarkup.setReplyMarkup(inlineMarkup);
 
-        // 4. Вызываем имеющийся метод
         sent.editMessageMarkup(user, messageId, textProduct, editMarkup);
+    }
+    public void sentBack(User user, Consumer<User> UIFunction, String text, String buttonText){
+        Sent sent = new Sent();
+        KeyboardRow row1 = new KeyboardRow();
+        row1.add(buttonText);
+
+        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
+        keyboardMarkup.setKeyboard(List.of(row1));
+        keyboardMarkup.setResizeKeyboard(true);
+        keyboardMarkup.setOneTimeKeyboard(false);
+        SendMessage sendMessage = new SendMessage();
+
+        sendMessage.setReplyMarkup(keyboardMarkup);
+
+        sent.sendMessage(user,text, sendMessage);
     }
 }
