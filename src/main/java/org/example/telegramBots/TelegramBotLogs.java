@@ -5,6 +5,7 @@ import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.CopyMessage;
 import org.telegram.telegrambots.meta.api.methods.forum.CreateForumTopic;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.forum.ForumTopic;
@@ -57,7 +58,24 @@ public class TelegramBotLogs extends TelegramLongPollingBot {
             }
         }
     }
-
+    public void trySendPhoto(SendPhoto sendPhoto) {
+        boolean sent = false;
+        while (!sent) {
+            try {
+                execute(sendPhoto);
+                sent = true;
+            } catch (TelegramApiException e) {
+                System.err.println("❌ Failed to send: " + e.getMessage());
+                int retryAfterSeconds = extractRetryAfterSeconds(e.getMessage());
+                try {
+                    Thread.sleep((retryAfterSeconds > 0 ? retryAfterSeconds : 1) * 1000L);
+                } catch (InterruptedException ex) {
+                    ex.printStackTrace();
+                    break;
+                }
+            }
+        }
+    }
     public void trySendMessage(CopyMessage sendMessage) {
         boolean sent = false;
         while (!sent) {

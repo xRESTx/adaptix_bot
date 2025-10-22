@@ -8,7 +8,7 @@ public class Photo {
 
     @Id
     @Column(name = "idPhoto")
-    private int idPhoto;
+    private String idPhoto;
 
     @ManyToOne
     @JoinColumn(name = "idPurchase", nullable = false, foreignKey = @ForeignKey(name = "photo_idPurchase_purchase_idPurchase_foreign"))
@@ -18,11 +18,11 @@ public class Photo {
     @JoinColumn(name = "idUser", nullable = false, foreignKey = @ForeignKey(name = "photo_idUser_user_idUser_foreign"))
     private User user;
 
-    public int getIdPhoto() {
+    public String getIdPhoto() {
         return idPhoto;
     }
 
-    public void setIdPhoto(int idPhoto) {
+    public void setIdPhoto(String idPhoto) {
         this.idPhoto = idPhoto;
     }
 

@@ -12,7 +12,7 @@ import org.example.table.Product;
 import org.example.table.Purchase;
 import org.example.table.User;
 import org.example.telegramBots.TelegramBot;
-import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.objects.Contact;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.PhotoSize;
 import org.telegram.telegrambots.meta.api.objects.Update;
@@ -25,10 +25,7 @@ import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.time.Period;
-import java.util.Comparator;
-import java.util.Date;
-import java.util.Objects;
-import java.util.ResourceBundle;
+import java.util.*;
 
 public class MessageProcessing {
 
@@ -70,9 +67,13 @@ public class MessageProcessing {
         }
 
         User user = userDAO.findById(chatId);
-        if (user != null) {
-            createTelegramBot.sendMessageUser(groupID, user.getId_message(), "Пользователь: " + msg);
-        } else {
+//        if (user != null) {
+//            createTelegramBot.sendMessageUser(groupID, user.getId_message(), "Пользователь: " + msg);
+//        } else {
+//            logicUI.sendStart(chatId, update);
+//            return;
+//        }
+        if(user == null){
             logicUI.sendStart(chatId, update);
             return;
         }
@@ -80,10 +81,14 @@ public class MessageProcessing {
             switch (msg) {
                 case "/start" -> logicUI.sendStart(chatId, update);
                 case "Админ меню" -> logicUI.sendAdminMenu(user,null);
-                case "Каталог товаров" -> logicUI.sendProducts(user,null);
+                case "Каталог товаров" -> logicUI.sendProducts(user);
                 case "Отмена добавления товара" -> {
                     SessionStore.removeState(chatId);
-                    logicUI.sendMenu(user);
+                    logicUI.sendMenu(user, null);
+                }
+                case "Отмена покупки товара" -> {
+                    SessionStore.removeState(chatId);
+                    logicUI.sendProducts(user);
                 }
             }
         }
@@ -157,26 +162,35 @@ public class MessageProcessing {
                                 session.setStep(ReviewRequestSession.Step.FULL_NAME);
                                 createTelegramBot.sendMessage(user,
                                         "Введите, пожалуйста, ваше полное ФИО без сокращений:");
-                                return;
                             }else {
                                 createTelegramBot.sendMessage(user,"Введен неправильный артикль, повторите попытку");
-                                return;
                             }
+                            break;
 
                         case FULL_NAME:
                             session.getRequest().setFullName(msg.trim());
                             session.setStep(ReviewRequestSession.Step.PHONE_NUMBER);
-                            createTelegramBot.sendMessage(user,
-                                    "Отлично. Теперь введите ваш номер телефона:");
-                            return;
+
+                            logicUI.sendNumberPhone(user);
+                            break;
 
                         case PHONE_NUMBER:
-                            session.getRequest().setPhoneNumber(msg.trim());
+                            String phoneNumber;
+                            if(update.getMessage().getContact() != null){
+                                Contact contact = update.getMessage().getContact();
+                                phoneNumber = contact.getPhoneNumber();
+                            }else{
+                                phoneNumber = msg;
+                            }
+
+
+                            session.getRequest().setPhoneNumber(phoneNumber.trim());
                             session.setStep(ReviewRequestSession.Step.CARD_NUMBER);
-                            createTelegramBot.sendMessage(user,
-                                    "Введите номер карты для получения кешбэка \n" +
-                                            "(<strong>Т-Банк</strong> или <strong>Сбер</strong>, другие не поддерживаем):");
-                            return;
+
+                            logicUI.sentBack(user, "Введите номер карты для получения кешбэка \n" +
+                                    "(<strong>Т-Банк</strong> или <strong>Сбер</strong>, другие не поддерживаем):", "Отмена покупки товара");
+
+                            break;
 
                         case CARD_NUMBER:
                             // можно добавить лёгкую валидацию, если нужно
@@ -184,7 +198,7 @@ public class MessageProcessing {
                             session.setStep(ReviewRequestSession.Step.PURCHASE_AMOUNT);
                             createTelegramBot.sendMessage(user,
                                     "Укажите сумму покупки товара на Wildberries:");
-                            return;
+                            break;
 
                         case PURCHASE_AMOUNT:
                             try {
@@ -194,24 +208,22 @@ public class MessageProcessing {
                                 session.setStep(ReviewRequestSession.Step.BANK_NAME);
                                 logicUI.sendMessageBank(user,
                                         "Укажите название банка, выпустившего карту:");
-                                return;
+                                break;
                             } catch (NumberFormatException e) {
                                 createTelegramBot.sendMessage(user, "Некорректная сумма. Пожалуйста, введите число.");
-                                return;
+                                break;
                             }
 
 
                         case BANK_NAME:
                             session.getRequest().setBankName(msg.trim());
                             session.setStep(ReviewRequestSession.Step.ORDER_SCREENSHOT);
-                            createTelegramBot.sendMessage(user,
-                                    "Прикрепите скриншот заказа с Wildberries, " +
-                                            "где виден артикул и цена товара:");
-                            return;
+                            logicUI.sentBack(user, "Прикрепите скриншот заказа с Wildberries с товаром:", "Отмена покупки товара");
+                            break;
 
                         case ORDER_SCREENSHOT:
                             handleScreenshot(update,user);
-                            return;
+                            break;
                     }
                 }
             }
@@ -250,52 +262,38 @@ public class MessageProcessing {
         long chatId = update.getMessage().getChatId();
         Message message = update.getMessage();
         TelegramBot telegramBot = new TelegramBot();
-
         ReviewRequestSession session = SessionStore.getReviewSession(chatId);
         if (session == null || session.getStep() != ReviewRequestSession.Step.ORDER_SCREENSHOT) {
-            return;                        // лишний вызов – игнорим
+            return;
         }
-
-        /* 1. Проверяем, что прислали именно фото */
         if (message.getPhoto() == null || message.getPhoto().isEmpty()) {
             createTelegramBot.sendMessage(user, "Пожалуйста, приложите скриншот заказа картинкой.");
             return;
         }
-
-        /* 2. Берём largest photo */
         PhotoSize photo = message.getPhoto().get(message.getPhoto().size() - 1);
         String fileId   = photo.getFileId();
-
         try {
-            /* 3. Готовим папку reviews/ */
             File reviewsDir = new File("reviews/");
             if (!reviewsDir.exists()) reviewsDir.mkdirs();
-
-            String fileName = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss-SSS").format(new Date()) + ".jpg";
+            String fileName = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss").format(new Date()) + ".jpg";
             Path filePath   = Paths.get("reviews/", fileName);
 
-            /* 4. Качаем файл */
             telegramBot.downloadFile(fileId, filePath.toString());
-
-            /* 5. Создаём Purchase */
             Purchase purchase = new Purchase();
-            purchase.setProduct(session.getProduct());   // Product уже лежит в сессии
+            purchase.setProduct(session.getProduct());
             purchase.setUser(user);
             purchase.setDate(LocalDate.now());
-            purchase.setPurchaseStage(0);                // 0 = заявка создана
-
+            purchase.setPurchaseStage(0);
             PurchaseDAO purchaseDAO = new PurchaseDAO();
-            purchaseDAO.save(purchase);                  // idPurchase сгенерируется БД
+            purchaseDAO.save(purchase);
 
-            /* 6. Создаём Photo */
             Photo photoEntity = new Photo();
             photoEntity.setPurchase(purchase);
             photoEntity.setUser(user);
-
+            photoEntity.setIdPhoto(fileName);
             PhotoDAO photoDAO = new PhotoDAO();
             photoDAO.save(photoEntity);
 
-            /* 7. Финальное сообщение */
             String finishText =
                     "Спасибо за участие!\n\n" +
                             "После получения товара (на следующий день после забора с ПВЗ):\n" +
@@ -304,11 +302,17 @@ public class MessageProcessing {
                             "3️⃣ После утверждения отзыва администратором, перейдите в раздел " +
                             "→ «💸 Получить кешбек» и отправьте скриншот вашего отзыва";
 
-            createTelegramBot.sendMessage(user, finishText);
-
-            /* 8. Чистим сессию */
+            LogicUI logicUI = new LogicUI();
+            logicUI.sendMenu(user, finishText);
             SessionStore.removeReviewSession(chatId);
-
+            String text =
+                    "Пользователь купил товар \"" + session.getProduct().getProductName() + "\"\n"
+                    + "ФИО: " + session.getRequest().getFullName() + "\n"
+                    + "Номер телефона: <code>" + session.getRequest().getPhoneNumber() + "</code>\n"
+                    + "Банк: " + session.getRequest().getBankName() + "\n"
+                    + "Реквизиты: <code>" + session.getRequest().getCardNumber() + "</code>\n"
+                    + "Стоимость для пользователя: <code>" + session.getRequest().getPurchaseAmount() + "</code>\n";
+            createTelegramBot.sendMessageGroup(user,text, filePath.toString());
         } catch (TelegramApiException | IOException e) {
             e.printStackTrace();
             createTelegramBot.sendMessage(user, "Не удалось загрузить скриншот. Попробуйте ещё раз.");
@@ -368,7 +372,7 @@ public class MessageProcessing {
                                 "- Желающие возвращать товар на ПВЗ не могут участвовать в акции \uD83D\uDEAB";
                 createTelegramBot.sendPhoto(user.getIdUser(),filePath.toString(),textProduct);
                 LogicUI logicUI = new LogicUI();
-                logicUI.sendMenu(user);
+                logicUI.sendMenu(user,null);
             } catch (TelegramApiException | IOException e) {
                 e.printStackTrace();
                 createTelegramBot.sendMessage(user, "Произошла ошибка при загрузке фотографии.");
@@ -380,6 +384,7 @@ public class MessageProcessing {
         LogicUI logicUI = new LogicUI();
         String data = update.getCallbackQuery().getData();
         Long chatId = update.getCallbackQuery().getMessage().getChatId();
+        SessionStore.clearAll(chatId);
 
         UserDAO userDAO = new UserDAO();
         User user = userDAO.findById(chatId);
@@ -418,7 +423,7 @@ public class MessageProcessing {
                         ProductCreationSession session = new ProductCreationSession();
                         SessionStore.setProductSession(chatId, session);
                         SessionStore.setState(chatId, "PRODUCT_CREATION");
-                        logicUI.sentBack(user,u -> logicUI.sendProducts(user,null), "Отправьте артикуль товара:", "Отмена добавления товара");
+                        logicUI.sentBack(user, "Отправьте артикуль товара:", "Отмена добавления товара");
                     } else {
                         createTelegramBot.sendMessage(user, "У вас нет прав для добавления товара.");
                     }
@@ -433,11 +438,11 @@ public class MessageProcessing {
                     break;
                 }
                 case "Exit":{
-                    if(!user.isUserFlag() && user.isAdmin()){
-                        logicUI.sendAdminMenu(user, Integer.parseInt(messageID));
-                    }else {
-                        logicUI.sendProducts(user,Integer.parseInt(messageID));
-                    }
+                    logicUI.sendMenuAgain(user,Integer.parseInt(messageID));
+                    break;
+                }
+                case "Exit_Product":{
+                    logicUI.sendProducts(user);
                     break;
                 }
                 case "buy_product":{
@@ -446,7 +451,11 @@ public class MessageProcessing {
                     ReviewRequestSession session = new ReviewRequestSession();
                     session.setProduct(product);
                     session.setStep(ReviewRequestSession.Step.ARTICUL_CHECK);
-                    createTelegramBot.sendMessage(user,"Пожалуйста, введите артикул товара Wildberries для проверки.");
+                    SessionStore.setReviewSession(chatId,session);
+
+                    SessionStore.setState(chatId, "REVIEW_REQUEST");
+
+                    logicUI.sentBack(user, "Пожалуйста, введите артикул товара Wildberries для проверки.", "Отмена покупки товара");
 
                     break;
                 }

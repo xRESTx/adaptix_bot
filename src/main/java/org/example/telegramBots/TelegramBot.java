@@ -2,6 +2,7 @@ package org.example.telegramBots;
 
 
 import org.example.session.ProductCreationSession;
+import org.example.session.ReviewRequestSession;
 import org.example.session.SessionStore;
 import org.example.tgProcessing.MessageProcessing;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
@@ -48,15 +49,18 @@ public class TelegramBot extends TelegramLongPollingBot {
                         return;
                     }
                     if(update.getMessage().hasPhoto()){
-                        if(SessionStore.getProductSession(update.getMessage().getChatId())!=null && SessionStore.getProductSession(update.getMessage().getChatId()).getStep() == ProductCreationSession.Step.PHOTO){
+                        if((SessionStore.getProductSession(update.getMessage().getChatId())!=null && SessionStore.getProductSession(update.getMessage().getChatId()).getStep() == ProductCreationSession.Step.PHOTO)
+                                || SessionStore.getReviewSession(update.getMessage().getChatId())!=null && SessionStore.getReviewSession(update.getMessage().getChatId()).getStep() == ReviewRequestSession.Step.ORDER_SCREENSHOT){
                             messageProcessing.handleUpdate(update);
+
                         }else{
                             messageProcessing.sentPhotoUpdate(update);
                         }
                         return;
                     }
-                    if ((update.hasMessage() && update.getMessage().hasText())
-                            || (SessionStore.getProductSession(update.getMessage().getChatId()).getStep() == ProductCreationSession.Step.PHOTO)) {
+                    if (((update.hasMessage() && update.getMessage().hasText()) || update.getMessage().hasContact() )
+                            || (SessionStore.getProductSession(update.getMessage().getChatId()).getStep() == ProductCreationSession.Step.PHOTO)
+                            || (SessionStore.getReviewSession(update.getMessage().getChatId()).getStep() == ReviewRequestSession.Step.ORDER_SCREENSHOT)) {
                         messageProcessing.handleUpdate(update);
                         return;
                     }
@@ -138,11 +142,13 @@ public class TelegramBot extends TelegramLongPollingBot {
             } catch (TelegramApiException e) {
                 System.err.println("❌ Failed to send: " + e.getMessage());
                 int retryAfterSeconds = extractRetryAfterSeconds(e.getMessage());
-                try {
-                    Thread.sleep((retryAfterSeconds > 0 ? retryAfterSeconds : 1) * 1000L);
-                } catch (InterruptedException ex) {
-                    ex.printStackTrace();
-                    break;
+                if (retryAfterSeconds > 0) {
+                    try {
+                        Thread.sleep(retryAfterSeconds * 1000L);
+                    } catch (InterruptedException ex) {
+                        ex.printStackTrace();
+                        break;
+                    }
                 }
             }
         }

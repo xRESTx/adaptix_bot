@@ -11,11 +11,11 @@ import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageTe
 import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import java.io.File;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.ResourceBundle;
 
@@ -41,18 +41,47 @@ public class Sent {
 
         Message sentMessage = telegramBot.trySendMessage(sendMessage);
 
+//        ResourceBundle rb = ResourceBundle.getBundle("app");
+//        long groupID = Long.parseLong(rb.getString("tg.group"));
+//        if(sendMessage.getReplyMarkup()!=null){
+//            SendMessage replyMessage = new SendMessage();
+//
+//            replyMessage.setReplyMarkup(sendMessage.getReplyMarkup());
+//
+//            sendMessageUser(groupID,user.getId_message(),messageText, replyMessage);
+//        }else{
+//            sendMessageUser(groupID,user.getId_message(),messageText);
+//        }
+        return sentMessage;
+    }
+
+    public void sendMessageGroup(User user,String text, String filePath){
         ResourceBundle rb = ResourceBundle.getBundle("app");
         long groupID = Long.parseLong(rb.getString("tg.group"));
-        if(sendMessage.getReplyMarkup()!=null){
-            SendMessage replyMessage = new SendMessage();
+        if(filePath == null){
+            SendMessage sendGroup = new SendMessage();
+            sendGroup.setChatId(groupID);
+            sendGroup.setText(text);
+            sendGroup.setParseMode("HTML");
+            sendGroup.setMessageThreadId(user.getId_message());
+            telegramBotLogs.trySendMessage(sendGroup);
+        }else {
+            SendPhoto sendPhoto = new SendPhoto();
+            sendPhoto.setChatId(groupID);
+            sendPhoto.setCaption(text);
+            sendPhoto.setParseMode("HTML");
 
-            replyMessage.setReplyMarkup(sendMessage.getReplyMarkup());
+            File file = new File(filePath);
+            if (!file.exists()) {
+                System.out.println("File does not exist: " + filePath);
+                return;
+            }
 
-            sendMessageUser(groupID,user.getId_message(),messageText, replyMessage);
-        }else{
-            sendMessageUser(groupID,user.getId_message(),messageText);
+            InputFile inputFile = new InputFile(file);
+            sendPhoto.setPhoto(inputFile);
+
+            telegramBotLogs.trySendPhoto(sendPhoto);
         }
-        return sentMessage;
     }
 
     public void sendMessageStart(User user, String messageText, SendMessage sendMessage) {
@@ -104,7 +133,22 @@ public class Sent {
 
         telegramBot.trySendMessage(sendMessage);
 
-        sendMessageUser(groupID,user.getId_message(),messageText);
+//        sendMessageUser(groupID,user.getId_message(),messageText);
+    }
+
+    public void sendReplyKeyboardMarkup(User user, ReplyKeyboardMarkup replyKeyboardMarkup, String text){
+        SendMessage sendMessage = new SendMessage();
+
+        ResourceBundle rb = ResourceBundle.getBundle("app");
+        long groupID = Long.parseLong(rb.getString("tg.group"));
+
+        sendMessage.setChatId(user.getIdUser());
+        sendMessage.setText(text);
+        sendMessage.setParseMode("HTML");
+        sendMessage.setReplyMarkup(replyKeyboardMarkup);
+
+        telegramBot.trySendMessage(sendMessage);
+//        sendMessageUser(groupID,user.getId_message(),text);
     }
 
     public void editMessageMarkup(User user, Integer messageId, String newText, EditMessageReplyMarkup markup) {
@@ -136,23 +180,35 @@ public class Sent {
         }
     }
     public void sendPhoto(long chatId, String filePath, String caption) {
-        // Создаем объект SendPhoto
         SendPhoto sendPhoto = new SendPhoto();
         sendPhoto.setChatId(chatId);
         sendPhoto.setCaption(caption);
 
-        // Проверяем, что файл существует
         File file = new File(filePath);
         if (!file.exists()) {
             System.out.println("File does not exist: " + filePath);
             return;
         }
 
-        // Создаем объект InputFile и загружаем файл
         InputFile inputFile = new InputFile(file);
         sendPhoto.setPhoto(inputFile);
 
-        // Отправляем фотографию с использованием метода trySendPhoto
+        telegramBot.trySendPhoto(sendPhoto);
+    }
+
+    public void sendPhotoWithButton(long chatId, String filePath, String caption, SendPhoto sendPhoto) {
+        sendPhoto.setChatId(chatId);
+        sendPhoto.setCaption(caption);
+
+        File file = new File(filePath);
+        if (!file.exists()) {
+            System.out.println("File does not exist: " + filePath);
+            return;
+        }
+
+        InputFile inputFile = new InputFile(file);
+        sendPhoto.setPhoto(inputFile);
+
         telegramBot.trySendPhoto(sendPhoto);
     }
 }

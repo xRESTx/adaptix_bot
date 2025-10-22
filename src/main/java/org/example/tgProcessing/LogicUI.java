@@ -4,20 +4,23 @@ import org.example.dao.ProductDAO;
 import org.example.dao.UserDAO;
 import org.example.table.Product;
 import org.example.table.User;
+import org.example.telegramBots.TelegramBot;
 import org.example.telegramBots.TelegramBotLogs;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageReplyMarkup;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardRemove;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardButton;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.function.Consumer;
 
 public class LogicUI {
 
@@ -110,7 +113,25 @@ public class LogicUI {
             sent.editMessageMarkup(user,messageId,"Выберите действие: Админ меню",editMarkup);
         }
     }
-    public void sendMenu(User user){
+
+    public void sendNumberPhone(User user){
+        Sent createTelegramBot = new Sent();
+        KeyboardButton contactButton = new KeyboardButton("Отправить номер");
+        contactButton.setRequestContact(true);
+
+        KeyboardRow row = new KeyboardRow();
+        row.add(contactButton);
+
+        List<KeyboardRow> keyboard = new ArrayList<>();
+        keyboard.add(row);
+
+        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
+        keyboardMarkup.setKeyboard(keyboard);
+        keyboardMarkup.setResizeKeyboard(true);
+        keyboardMarkup.setOneTimeKeyboard(true);
+        createTelegramBot.sendReplyKeyboardMarkup(user,keyboardMarkup,"Отлично. Теперь введите ваш номер телефона:");
+    }
+    public void sendMenu(User user, String text){
         Sent sent = new Sent();
 
         KeyboardRow row1 = new KeyboardRow();
@@ -133,10 +154,37 @@ public class LogicUI {
         SendMessage sendMessage = new SendMessage();
 
         sendMessage.setReplyMarkup(keyboardMarkup);
+        if(text == null){
+            sent.sendMessageStart(user, "Выберите действие Меню", sendMessage);
+        }else{
+            sent.sendMessageStart(user, text, sendMessage);
+        }
+    }
+    public void sendMenuAgain(User user, Integer messageID){
+        TelegramBot telegramBot = new TelegramBot();
+        telegramBot.deleteMessage(user.getIdUser(),messageID);
+        Sent sent = new Sent();
+
+        KeyboardRow row1 = new KeyboardRow();
+        row1.add("Каталог товаров");
+        row1.add("Оставить отзыв");
+        KeyboardRow row2 = new KeyboardRow();
+        row2.add("Техподдержка");
+        row2.add("Получить кешбек");
+
+        KeyboardRow row3 = new KeyboardRow();
+        if(user!=null && user.isAdmin()) {
+            row3.add("Админ меню");
+        }
+        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
+        keyboardMarkup.setKeyboard(List.of(row1,row2,row3));
+        keyboardMarkup.setResizeKeyboard(true);
+        keyboardMarkup.setOneTimeKeyboard(false);
+        SendMessage sendMessage = new SendMessage();
+        sendMessage.setReplyMarkup(keyboardMarkup);
         sent.sendMessageStart(user, "Выберите действие Меню", sendMessage);
     }
-
-    public void sendProducts(User user, Integer messageId){
+    public void sendProducts(User user){
         Sent sent = new Sent();
         SendMessage sendMessage = new SendMessage();
         ProductDAO productDAO = new ProductDAO();
@@ -147,15 +195,23 @@ public class LogicUI {
         if(products.isEmpty()){
             sent.sendMessage(user,"К сожалению товаров на выкуп нет",sendMessage);
             return;
-        }else if(messageId == null){
-            messageId = sent.sendMessage(user,"📦 Выберите товар:",sendMessage).getMessageId();
         }
+        TelegramBot telegramBot = new TelegramBot();
+        ReplyKeyboardRemove keyboardRemove = new ReplyKeyboardRemove();
+        keyboardRemove.setRemoveKeyboard(true);
+        sendMessage.setReplyMarkup(keyboardRemove);
+
+        int messageId = sent.sendMessage(user,"📦 Выберите товар:",sendMessage).getMessageId();
+        telegramBot.deleteMessage(user.getIdUser(),messageId);
+
+        SendMessage sendAgain = new SendMessage();
+        messageId = sent.sendMessage(user,"📦 Выберите товар:",sendAgain).getMessageId();
 
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
 
         for(Product product : products){
             InlineKeyboardButton button = new InlineKeyboardButton();
-            button.setText("Товар:" + product.getProductName() + "  " + product.getCashbackPercentage() + "%");
+            button.setText(product.getProductName() + "  " + product.getCashbackPercentage() + "% кешбек");
             button.setCallbackData("product_:" + product.getIdProduct() + ":" + messageId);
             rows.add(List.of(button));
         }
@@ -177,7 +233,7 @@ public class LogicUI {
         editMarkup.setMessageId(messageId);
         editMarkup.setReplyMarkup(markup);
 
-        sent.editMessageMarkup(user, messageId, "📦 Выберите тариф:", editMarkup);
+        sent.editMessageMarkup(user, messageId, "📦 Выберите товар:", editMarkup);
     }
     public void sendMessageBank(User user, String text){
         Sent sent = new Sent();
@@ -220,11 +276,11 @@ public class LogicUI {
                         "- Отзыв нужно оставить не позднее 3 дней после забора товара с ПВЗ \uD83D\uDCC5\n" +
                         "- Желающие возвращать товар на ПВЗ не могут участвовать в акции \uD83D\uDEAB";
         List<List<InlineKeyboardButton>> keyboard = new ArrayList<>();
-        if(messageId!=0){
-            InlineKeyboardButton back = new InlineKeyboardButton("⬅️ Назад");
-            back.setCallbackData("Exit:" + messageId);
-            keyboard.add(List.of(back));
-        }
+
+        InlineKeyboardButton back = new InlineKeyboardButton("⬅️ Назад");
+        back.setCallbackData("Exit_Product:" + messageId);
+        keyboard.add(List.of(back));
+
         if(!user.isUserFlag() && user.isAdmin()){
             InlineKeyboardButton name = new InlineKeyboardButton("Наименование");
             name.setCallbackData("update_tariffs_name_" + selected.getIdProduct());
@@ -258,14 +314,17 @@ public class LogicUI {
         InlineKeyboardMarkup inlineMarkup = new InlineKeyboardMarkup();
         inlineMarkup.setKeyboard(keyboard);
 
-        EditMessageReplyMarkup editMarkup = new EditMessageReplyMarkup();
-        editMarkup.setChatId(String.valueOf(user.getIdUser()));
-        editMarkup.setMessageId(messageId);
-        editMarkup.setReplyMarkup(inlineMarkup);
+        TelegramBot telegramBot = new TelegramBot();
+        telegramBot.deleteMessage(user.getIdUser(),messageId);
 
-        sent.editMessageMarkup(user, messageId, textProduct, editMarkup);
+        SendPhoto sendPhoto = new SendPhoto();
+        sendPhoto.setChatId(String.valueOf(user.getIdUser()));
+        sendPhoto.setReplyMarkup(inlineMarkup);
+
+        sent.sendPhotoWithButton(user.getIdUser(), selected.getPhoto(), textProduct, sendPhoto);
     }
-    public void sentBack(User user, Consumer<User> UIFunction, String text, String buttonText){
+
+    public void sentBack(User user, String text, String buttonText){
         Sent sent = new Sent();
         KeyboardRow row1 = new KeyboardRow();
         row1.add(buttonText);

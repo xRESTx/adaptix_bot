@@ -22,7 +22,7 @@ public class ReviewRequestSession {
         return product;
     }
 
-    public void setProduct(Product product) {
+    public  void setProduct(Product product) {
         this.product = product;
     }
 
