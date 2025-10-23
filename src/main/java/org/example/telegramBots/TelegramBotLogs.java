@@ -6,6 +6,7 @@ import org.telegram.telegrambots.meta.api.methods.CopyMessage;
 import org.telegram.telegrambots.meta.api.methods.forum.CreateForumTopic;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
+import org.telegram.telegrambots.meta.api.methods.send.SendVideo;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.forum.ForumTopic;
@@ -40,12 +41,11 @@ public class TelegramBotLogs extends TelegramLongPollingBot {
         return rb.getString("bot.token2");
     }
 
-    public void trySendMessage(SendMessage sendMessage) {
+    public org.telegram.telegrambots.meta.api.objects.Message trySendMessage(SendMessage sendMessage) {
         boolean sent = false;
         while (!sent) {
             try {
-                execute(sendMessage);
-                sent = true;
+                return execute(sendMessage);
             } catch (TelegramApiException e) {
                 System.err.println("❌ Failed to send: " + e.getMessage());
                 int retryAfterSeconds = extractRetryAfterSeconds(e.getMessage());
@@ -57,13 +57,13 @@ public class TelegramBotLogs extends TelegramLongPollingBot {
                 }
             }
         }
+        return null;
     }
-    public void trySendPhoto(SendPhoto sendPhoto) {
+    public org.telegram.telegrambots.meta.api.objects.Message trySendPhoto(SendPhoto sendPhoto) {
         boolean sent = false;
         while (!sent) {
             try {
-                execute(sendPhoto);
-                sent = true;
+                return execute(sendPhoto);
             } catch (TelegramApiException e) {
                 System.err.println("❌ Failed to send: " + e.getMessage());
                 int retryAfterSeconds = extractRetryAfterSeconds(e.getMessage());
@@ -75,6 +75,7 @@ public class TelegramBotLogs extends TelegramLongPollingBot {
                 }
             }
         }
+        return null;
     }
     public void trySendMessage(CopyMessage sendMessage) {
         boolean sent = false;
@@ -160,5 +161,24 @@ public class TelegramBotLogs extends TelegramLongPollingBot {
         } catch (TelegramApiException e) {
             e.printStackTrace();
         }
+    }
+    
+    public org.telegram.telegrambots.meta.api.objects.Message trySendVideo(SendVideo sendVideo) {
+        boolean sent = false;
+        while (!sent) {
+            try {
+                return execute(sendVideo);
+            } catch (TelegramApiException e) {
+                System.err.println("❌ Failed to send video: " + e.getMessage());
+                int retryAfterSeconds = extractRetryAfterSeconds(e.getMessage());
+                try {
+                    Thread.sleep((retryAfterSeconds > 0 ? retryAfterSeconds : 1) * 1000L);
+                } catch (InterruptedException ex) {
+                    ex.printStackTrace();
+                    break;
+                }
+            }
+        }
+        return null;
     }
 }

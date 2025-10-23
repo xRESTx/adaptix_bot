@@ -1,10 +1,10 @@
 package org.example.dao;
 
+import org.example.database.DatabaseManager;
 import org.example.table.Photo;
 import org.hibernate.Session;
 import org.hibernate.SessionFactory;
 import org.hibernate.Transaction;
-import org.hibernate.cfg.Configuration;
 
 import java.util.List;
 
@@ -13,11 +13,8 @@ public class PhotoDAO {
     private final SessionFactory sessionFactory;
 
     public PhotoDAO() {
-        try {
-            sessionFactory = new Configuration().configure().buildSessionFactory();
-        } catch (Throwable ex) {
-            throw new ExceptionInInitializerError("Failed to create SessionFactory: " + ex);
-        }
+        // Используем централизованный DatabaseManager
+        this.sessionFactory = DatabaseManager.getInstance().getSessionFactory();
     }
 
     public void save(Photo photo) {
@@ -67,7 +64,5 @@ public class PhotoDAO {
         }
     }
 
-    public void close() {
-        sessionFactory.close();
-    }
+    // Удаляем метод close() - управление жизненным циклом в DatabaseManager
 }

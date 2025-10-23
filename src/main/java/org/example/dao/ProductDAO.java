@@ -1,10 +1,10 @@
 package org.example.dao;
 
+import org.example.database.DatabaseManager;
 import org.example.table.Product;
 import org.hibernate.Session;
 import org.hibernate.SessionFactory;
 import org.hibernate.Transaction;
-import org.hibernate.cfg.Configuration;
 import org.hibernate.query.Query;
 
 import java.util.List;
@@ -14,11 +14,8 @@ public class ProductDAO {
     private final SessionFactory sessionFactory;
 
     public ProductDAO() {
-        try {
-            sessionFactory = new Configuration().configure().buildSessionFactory();
-        } catch (Throwable ex) {
-            throw new ExceptionInInitializerError("Ошибка создания SessionFactory: " + ex);
-        }
+        // Используем централизованный DatabaseManager
+        this.sessionFactory = DatabaseManager.getInstance().getSessionFactory();
     }
 
     public void save(Product product) {
@@ -73,9 +70,7 @@ public class ProductDAO {
         }
     }
 
-    public void close() {
-        sessionFactory.close();
-    }
+    // Удаляем метод close() - управление жизненным циклом в DatabaseManager
 
     // Вспомогательный метод для управления транзакциями
     private void executeInsideTransaction(SessionAction action) {

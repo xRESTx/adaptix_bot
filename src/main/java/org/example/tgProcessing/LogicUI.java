@@ -1,10 +1,14 @@
 package org.example.tgProcessing;
 
 import org.example.dao.ProductDAO;
+import org.example.dao.PurchaseDAO;
 import org.example.dao.UserDAO;
 import org.example.table.Product;
+import org.example.table.Purchase;
 import org.example.table.User;
+import org.example.settings.AdminSettings;
 import org.example.telegramBots.TelegramBot;
+import java.util.ResourceBundle;
 import org.example.telegramBots.TelegramBotLogs;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
@@ -78,6 +82,8 @@ public class LogicUI {
             }
             List<InlineKeyboardButton> row1 = new ArrayList<>();
             List<InlineKeyboardButton> row2 = new ArrayList<>();
+            List<InlineKeyboardButton> row3 = new ArrayList<>();
+            
             InlineKeyboardButton btnAddAdmin = new InlineKeyboardButton();
             btnAddAdmin.setText("Добавить админа");
             btnAddAdmin.setCallbackData("addAdmin:" + messageId);
@@ -98,9 +104,16 @@ public class LogicUI {
                 btnIsAdmin.setCallbackData("isUser:" + messageId);
                 row2.add(btnIsAdmin);
             }
+            
+            // Кнопка для админ-интерфейса
+            InlineKeyboardButton btnAdminInterface = new InlineKeyboardButton();
+            btnAdminInterface.setText("🔧 Админ-интерфейс");
+            btnAdminInterface.setCallbackData("admin_menu");
+            row3.add(btnAdminInterface);
             List<List<InlineKeyboardButton>> keyboard = new ArrayList<>();
             keyboard.add(row1);
             keyboard.add(row2);
+            keyboard.add(row3);
 
             InlineKeyboardMarkup inlineKeyboard = new InlineKeyboardMarkup();
             inlineKeyboard.setKeyboard(keyboard);
@@ -189,9 +202,9 @@ public class LogicUI {
         SendMessage sendMessage = new SendMessage();
         ProductDAO productDAO = new ProductDAO();
 
-        List<Product> products = (user.isAdmin() && user.isUserFlag())
-                ? productDAO.findAllVisible()
-                : productDAO.findAll();
+        List<Product> products = user.isAdmin()
+                ? productDAO.findAll()  // Админу показываем все товары
+                : productDAO.findAllVisible();  // Пользователю только видимые
         if(products.isEmpty()){
             sent.sendMessage(user,"К сожалению товаров на выкуп нет",sendMessage);
             return;
@@ -235,11 +248,54 @@ public class LogicUI {
 
         sent.editMessageMarkup(user, messageId, "📦 Выберите товар:", editMarkup);
     }
+    
+    /**
+     * Показать товары админа (все товары) для выбора
+     */
+    public void sendAdminProducts(User user){
+        Sent sent = new Sent();
+        SendMessage sendMessage = new SendMessage();
+        ProductDAO productDAO = new ProductDAO();
+
+        List<Product> products = productDAO.findAll();  // Всегда показываем все товары админа
+        if(products.isEmpty()){
+            sent.sendMessage(user,"К сожалению товаров на выкуп нет",sendMessage);
+            return;
+        }
+        TelegramBot telegramBot = new TelegramBot();
+        ReplyKeyboardRemove keyboardRemove = new ReplyKeyboardRemove();
+        keyboardRemove.setRemoveKeyboard(true);
+        sendMessage.setReplyMarkup(keyboardRemove);
+
+        int messageId = sent.sendMessage(user,"📦 Выберите товар:",sendMessage).getMessageId();
+        telegramBot.deleteMessage(user.getIdUser(),messageId);
+
+        SendMessage sendAgain = new SendMessage();
+        messageId = sent.sendMessage(user,"📦 Выберите товар:",sendAgain).getMessageId();
+
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+
+        for(Product product : products){
+            InlineKeyboardButton button = new InlineKeyboardButton();
+            button.setText(product.getProductName() + "  " + product.getCashbackPercentage() + "% кешбек");
+            button.setCallbackData("product_:" + product.getIdProduct() + ":" + messageId);
+            rows.add(List.of(button));
+        }
+
+        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+        markup.setKeyboard(rows);
+
+        EditMessageReplyMarkup editMarkup = new EditMessageReplyMarkup();
+        editMarkup.setChatId(user.getIdUser());
+        editMarkup.setMessageId(messageId);
+        editMarkup.setReplyMarkup(markup);
+
+        sent.editMessageMarkup(user, messageId, "📦 Выберите товар:", editMarkup);
+    }
     public void sendMessageBank(User user, String text){
         Sent sent = new Sent();
 
         KeyboardRow row1 = new KeyboardRow();
-        row1.add("Т-Банк");
         row1.add("Сбер");
 
         ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
@@ -338,5 +394,833 @@ public class LogicUI {
         sendMessage.setReplyMarkup(keyboardMarkup);
 
         sent.sendMessage(user,text, sendMessage);
+    }
+
+    /**
+     * Обновить обычное меню (edit message)
+     */
+    public void updateMenu(User user, int messageId, String text) {
+        Sent sent = new Sent();
+
+        KeyboardRow row1 = new KeyboardRow();
+        row1.add("Каталог товаров");
+        row1.add("Оставить отзыв");
+
+        KeyboardRow row2 = new KeyboardRow();
+        row2.add("Техподдержка");
+        row2.add("Получить кешбек");
+
+        KeyboardRow row3 = new KeyboardRow();
+        if(user!=null && user.isAdmin()) {
+            row3.add("Админ меню");
+        }
+
+        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
+        keyboardMarkup.setKeyboard(List.of(row1,row2,row3));
+        keyboardMarkup.setResizeKeyboard(true);
+        keyboardMarkup.setOneTimeKeyboard(false);
+        
+        String messageText = text != null ? text : "Выберите действие Меню";
+        sent.editMessageMarkup(user, messageId, messageText, null);
+    }
+
+    // ==================== АДМИН ФУНКЦИИ ====================
+
+    /**
+     * Показать главное меню админа
+     */
+    public void showAdminMenu(User admin) {
+        System.out.println("🔧 Showing admin menu for user: " + admin.getUsername());
+        
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+        
+        // Кнопка "Просмотр товаров"
+        InlineKeyboardButton productsButton = new InlineKeyboardButton();
+        productsButton.setText("📦 Просмотр товаров");
+        productsButton.setCallbackData("admin_products");
+        
+        // Кнопка "Добавить товар"
+        InlineKeyboardButton addProductButton = new InlineKeyboardButton();
+        addProductButton.setText("➕ Добавить товар");
+        addProductButton.setCallbackData("admin_add_product");
+        
+        // Кнопка "Статистика"
+        InlineKeyboardButton statsButton = new InlineKeyboardButton();
+        statsButton.setText("📊 Статистика");
+        statsButton.setCallbackData("admin_stats");
+        
+        // Кнопка "Управление пользователями"
+        InlineKeyboardButton userManagementButton = new InlineKeyboardButton();
+        userManagementButton.setText("👥 Админы");
+        userManagementButton.setCallbackData("admin_user_management");
+        
+        // Кнопка "Настройки"
+        InlineKeyboardButton settingsButton = new InlineKeyboardButton();
+        settingsButton.setText("⚙️ Настройки");
+        settingsButton.setCallbackData("admin_settings");
+        
+        // Кнопка "Назад в обычное меню"
+        InlineKeyboardButton backToMenuButton = new InlineKeyboardButton();
+        backToMenuButton.setText("🏠 Назад в меню");
+        backToMenuButton.setCallbackData("admin_back_to_main_menu");
+        
+        rows.add(List.of(productsButton));
+        rows.add(List.of(addProductButton));
+        rows.add(List.of(statsButton));
+        rows.add(List.of(userManagementButton));
+        rows.add(List.of(settingsButton));
+        rows.add(List.of(backToMenuButton));
+        
+        keyboard.setKeyboard(rows);
+        
+        SendMessage message = new SendMessage();
+        message.setReplyMarkup(keyboard);
+        
+        Sent sent = new Sent();
+        System.out.println("📤 Sending admin menu message");
+        sent.sendMessage(admin, "🔧 Панель администратора", message);
+    }
+
+    /**
+     * Обновить главное меню админа (edit message)
+     */
+    public void updateAdminMenu(User admin, int messageId) {
+        System.out.println("🔧 Updating admin menu for user: " + admin.getUsername());
+        
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+        
+        // Кнопка "Просмотр товаров"
+        InlineKeyboardButton productsButton = new InlineKeyboardButton();
+        productsButton.setText("📦 Просмотр товаров");
+        productsButton.setCallbackData("admin_products");
+        
+        // Кнопка "Добавить товар"
+        InlineKeyboardButton addProductButton = new InlineKeyboardButton();
+        addProductButton.setText("➕ Добавить товар");
+        addProductButton.setCallbackData("admin_add_product");
+        
+        // Кнопка "Статистика"
+        InlineKeyboardButton statsButton = new InlineKeyboardButton();
+        statsButton.setText("📊 Статистика");
+        statsButton.setCallbackData("admin_stats");
+        
+        // Кнопка "Управление пользователями"
+        InlineKeyboardButton userManagementButton = new InlineKeyboardButton();
+        userManagementButton.setText("👥 Админы");
+        userManagementButton.setCallbackData("admin_user_management");
+        
+        // Кнопка "Настройки"
+        InlineKeyboardButton settingsButton = new InlineKeyboardButton();
+        settingsButton.setText("⚙️ Настройки");
+        settingsButton.setCallbackData("admin_settings");
+        
+        // Кнопка "Назад в обычное меню"
+        InlineKeyboardButton backToMenuButton = new InlineKeyboardButton();
+        backToMenuButton.setText("🏠 Назад в меню");
+        backToMenuButton.setCallbackData("admin_back_to_main_menu");
+        
+        rows.add(List.of(productsButton));
+        rows.add(List.of(addProductButton));
+        rows.add(List.of(statsButton));
+        rows.add(List.of(userManagementButton));
+        rows.add(List.of(settingsButton));
+        rows.add(List.of(backToMenuButton));
+        
+        keyboard.setKeyboard(rows);
+        
+        Sent sent = new Sent();
+        System.out.println("📤 Updating admin menu message");
+        sent.editMessageMarkup(admin, messageId, "🔧 Панель администратора", null);
+    }
+
+    /**
+     * Показать список товаров для админа
+     */
+    public void showProductsList(User admin) {
+        showProductsListWithEditButtons(admin);
+    }
+    
+    /**
+     * Показать список товаров с кнопками редактирования
+     */
+    public void showProductsListWithEditButtons(User admin) {
+        ProductDAO productDAO = new ProductDAO();
+        List<Product> products = productDAO.findAll();
+        
+        System.out.println("🔍 Found " + products.size() + " products in database");
+        
+        if (products.isEmpty()) {
+            // Показываем сообщение с кнопкой "Назад" даже если товаров нет
+            InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+            List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+            
+            // Кнопка "Назад"
+            InlineKeyboardButton backButton = new InlineKeyboardButton();
+            backButton.setText("⬅️ Назад в админ-меню");
+            backButton.setCallbackData("admin_back_to_menu");
+            
+            rows.add(List.of(backButton));
+            keyboard.setKeyboard(rows);
+            
+            SendMessage message = new SendMessage();
+            message.setReplyMarkup(keyboard);
+            
+            Sent sent = new Sent();
+            sent.sendMessage(admin, "📦 Список товаров пуст", message);
+            return;
+        }
+        
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+        
+        for (Product product : products) {
+            // Кнопка товара с индикатором видимости
+            InlineKeyboardButton productButton = new InlineKeyboardButton();
+            String visibilityIcon = product.isVisible() ? "👁️" : "🙈";
+            productButton.setText(visibilityIcon + " " + product.getProductName() + " (ID: " + product.getIdProduct() + ")");
+            productButton.setCallbackData("admin_product_" + product.getIdProduct());
+            
+            // Кнопка редактирования товара (меньше)
+            InlineKeyboardButton editButton = new InlineKeyboardButton();
+            editButton.setText("✏️");
+            editButton.setCallbackData("admin_edit_product_" + product.getIdProduct());
+            
+            // Размещаем кнопки в одной строке
+            rows.add(List.of(productButton, editButton));
+        }
+        
+        // Кнопка "Назад в админ-меню"
+        InlineKeyboardButton backButton = new InlineKeyboardButton();
+        backButton.setText("⬅️ Назад в админ-меню");
+        backButton.setCallbackData("admin_back_to_menu");
+        rows.add(List.of(backButton));
+        
+        keyboard.setKeyboard(rows);
+        
+        SendMessage message = new SendMessage();
+        message.setReplyMarkup(keyboard);
+        
+        Sent sent = new Sent();
+        sent.sendMessage(admin, "📦 Выберите товар для просмотра покупок или редактирования:", message);
+    }
+    
+    /**
+     * Показать список товаров с возможностью редактирования
+     */
+    public void showProductsListWithEdit(User admin) {
+        ProductDAO productDAO = new ProductDAO();
+        List<Product> products = productDAO.findAll();
+        
+        System.out.println("🔍 Found " + products.size() + " products in database");
+        
+        if (products.isEmpty()) {
+            // Показываем сообщение с кнопкой "Назад" даже если товаров нет
+            InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+            List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+            
+            // Кнопка "Назад"
+            InlineKeyboardButton backButton = new InlineKeyboardButton();
+            backButton.setText("⬅️ Назад в админ-меню");
+            backButton.setCallbackData("admin_back_to_menu");
+            
+            rows.add(List.of(backButton));
+            keyboard.setKeyboard(rows);
+            
+            SendMessage message = new SendMessage();
+            message.setReplyMarkup(keyboard);
+            
+            Sent sent = new Sent();
+            sent.sendMessage(admin, "📦 Список товаров пуст", message);
+            return;
+        }
+        
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+        
+        for (Product product : products) {
+            InlineKeyboardButton button = new InlineKeyboardButton();
+            button.setText(product.getProductName() + " (ID: " + product.getIdProduct() + ")");
+            button.setCallbackData("admin_product_" + product.getIdProduct());
+            
+            rows.add(List.of(button));
+        }
+        
+        // Кнопка "Назад в админ-меню"
+        InlineKeyboardButton backButton = new InlineKeyboardButton();
+        backButton.setText("⬅️ Назад в админ-меню");
+        backButton.setCallbackData("admin_back_to_menu");
+        rows.add(List.of(backButton));
+        
+        keyboard.setKeyboard(rows);
+        
+        SendMessage message = new SendMessage();
+        message.setReplyMarkup(keyboard);
+        
+        Sent sent = new Sent();
+        sent.sendMessage(admin, "📦 Выберите товар для просмотра покупок:", message);
+    }
+
+    /**
+     * Обновить список товаров (edit message)
+     */
+    public void updateProductsList(User admin, int messageId) {
+        ProductDAO productDAO = new ProductDAO();
+        List<Product> products = productDAO.findAll();
+        
+        System.out.println("🔍 Found " + products.size() + " products in database (update)");
+        
+        if (products.isEmpty()) {
+            Sent sent = new Sent();
+            sent.editMessageMarkup(admin, messageId, "📦 Список товаров пуст", null);
+            return;
+        }
+        
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+        
+        for (Product product : products) {
+            InlineKeyboardButton button = new InlineKeyboardButton();
+            button.setText(product.getProductName() + " (ID: " + product.getIdProduct() + ")");
+            button.setCallbackData("admin_product_" + product.getIdProduct());
+            
+            rows.add(List.of(button));
+        }
+        
+        // Кнопка "Назад в админ-меню"
+        InlineKeyboardButton backButton = new InlineKeyboardButton();
+        backButton.setText("⬅️ Назад в админ-меню");
+        backButton.setCallbackData("admin_back_to_menu");
+        rows.add(List.of(backButton));
+        
+        keyboard.setKeyboard(rows);
+        
+        EditMessageReplyMarkup editMarkup = new EditMessageReplyMarkup();
+        editMarkup.setChatId(admin.getIdUser());
+        editMarkup.setMessageId(messageId);
+        editMarkup.setReplyMarkup(keyboard);
+        
+        Sent sent = new Sent();
+        sent.editMessageMarkup(admin, messageId, "📦 Выберите товар для просмотра покупок:", editMarkup);
+    }
+
+    /**
+     * Показать список пользователей, купивших товар
+     */
+    public void showProductPurchases(User admin, int productId) {
+        ProductDAO productDAO = new ProductDAO();
+        PurchaseDAO purchaseDAO = new PurchaseDAO();
+        
+        Product product = productDAO.findById(productId);
+        if (product == null) {
+            // Показываем сообщение с кнопкой "Назад" если товар не найден
+            InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+            List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+            
+            // Кнопка "Назад"
+            InlineKeyboardButton backButton = new InlineKeyboardButton();
+            backButton.setText("⬅️ Назад к товарам");
+            backButton.setCallbackData("admin_back_to_products");
+            
+            rows.add(List.of(backButton));
+            keyboard.setKeyboard(rows);
+            
+            SendMessage message = new SendMessage();
+            message.setReplyMarkup(keyboard);
+            
+            Sent sent = new Sent();
+            sent.sendMessage(admin, "❌ Товар не найден", message);
+            return;
+        }
+        
+        List<Purchase> purchases = purchaseDAO.findByProductId(productId);
+        
+        if (purchases.isEmpty()) {
+            // Показываем сообщение с кнопкой "Назад" даже если покупок нет
+            InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+            List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+            
+            // Кнопка "Назад"
+            InlineKeyboardButton backButton = new InlineKeyboardButton();
+            backButton.setText("⬅️ Назад к товарам");
+            backButton.setCallbackData("admin_back_to_products");
+            
+            rows.add(List.of(backButton));
+            keyboard.setKeyboard(rows);
+            
+            SendMessage message = new SendMessage();
+            message.setReplyMarkup(keyboard);
+            
+            Sent sent = new Sent();
+            sent.sendMessage(admin, "📦 Покупок по товару \"" + product.getProductName() + "\" не найдено", message);
+            return;
+        }
+        
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+        
+        for (Purchase purchase : purchases) {
+            InlineKeyboardButton button = new InlineKeyboardButton();
+            button.setText(purchase.getUser().getUsername() + " - " + getPurchaseStageText(purchase.getPurchaseStage()));
+            button.setCallbackData("admin_user_" + purchase.getIdPurchase());
+            
+            rows.add(List.of(button));
+        }
+        
+        // Кнопка "Назад"
+        InlineKeyboardButton backButton = new InlineKeyboardButton();
+        backButton.setText("⬅️ Назад к товарам");
+        backButton.setCallbackData("admin_back_to_products");
+        
+        rows.add(List.of(backButton));
+        
+        keyboard.setKeyboard(rows);
+        
+        SendMessage message = new SendMessage();
+        message.setReplyMarkup(keyboard);
+        
+        Sent sent = new Sent();
+        sent.sendMessage(admin, "🛒 Покупатели товара \"" + product.getProductName() + "\":", message);
+    }
+
+    /**
+     * Показать детали покупки
+     */
+    public void showPurchaseDetails(User admin, int purchaseId) {
+        PurchaseDAO purchaseDAO = new PurchaseDAO();
+        Purchase purchase = purchaseDAO.findById(purchaseId);
+        
+        if (purchase == null) {
+            // Показываем сообщение с кнопкой "Назад" если покупка не найдена
+            InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+            List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+            
+            // Кнопка "Назад"
+            InlineKeyboardButton backButton = new InlineKeyboardButton();
+            backButton.setText("⬅️ Назад к товарам");
+            backButton.setCallbackData("admin_back_to_products");
+            
+            rows.add(List.of(backButton));
+            keyboard.setKeyboard(rows);
+            
+            SendMessage message = new SendMessage();
+            message.setReplyMarkup(keyboard);
+            
+            Sent sent = new Sent();
+            sent.sendMessage(admin, "❌ Покупка не найдена", message);
+            return;
+        }
+        
+        String timeText = "";
+        if (purchase.getOrderTime() != null) {
+            timeText = "\n🕐 Время заказа: " + purchase.getOrderTime().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"));
+        }
+        
+        String text = "🛒 Детали покупки:\n\n" +
+                     "👤 Пользователь: @" + purchase.getUser().getUsername() + "\n" +
+                     "📦 Товар: " + purchase.getProduct().getProductName() + "\n" +
+                     "📅 Дата: " + purchase.getDate() + timeText + "\n" +
+                     "📊 Статус: " + getPurchaseStageText(purchase.getPurchaseStage()) + "\n\n" +
+                     "📋 Этапы покупки:";
+        
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+        
+        // Кнопки для переходов к сообщениям этапов (только для выполненных)
+        System.out.println("🔍 Debug: OrderMessageId = " + purchase.getOrderMessageId());
+        System.out.println("🔍 Debug: ReviewMessageId = " + purchase.getReviewMessageId());
+        System.out.println("🔍 Debug: CashbackMessageId = " + purchase.getCashbackMessageId());
+        
+        if (purchase.getOrderMessageId() != null) {
+            try {
+                ResourceBundle rb = ResourceBundle.getBundle("app");
+                String groupIdStr = rb.getString("tg.group");
+                
+                // Убираем префикс "-100" если он есть
+                String cleanGroupId = groupIdStr;
+                if (groupIdStr.startsWith("-100")) {
+                    cleanGroupId = groupIdStr.substring(4);
+                } else if (groupIdStr.startsWith("100")) {
+                    cleanGroupId = groupIdStr.substring(3);
+                }
+                
+                String orderUrl = "https://t.me/c/" + cleanGroupId + "/" + purchase.getOrderMessageId();
+                
+                InlineKeyboardButton orderButton = new InlineKeyboardButton();
+                orderButton.setText("1️⃣ Товар заказан ✅");
+                orderButton.setUrl(orderUrl);
+                rows.add(List.of(orderButton));
+            } catch (Exception e) {
+                System.err.println("Ошибка при создании ссылки на заказ: " + e.getMessage());
+            }
+        }
+        
+        if (purchase.getReviewMessageId() != null) {
+            try {
+                ResourceBundle rb = ResourceBundle.getBundle("app");
+                String groupIdStr = rb.getString("tg.group");
+                
+                // Убираем префикс "-100" если он есть
+                String cleanGroupId = groupIdStr;
+                if (groupIdStr.startsWith("-100")) {
+                    cleanGroupId = groupIdStr.substring(4);
+                } else if (groupIdStr.startsWith("100")) {
+                    cleanGroupId = groupIdStr.substring(3);
+                }
+                
+                String reviewUrl = "https://t.me/c/" + cleanGroupId + "/" + purchase.getReviewMessageId();
+                
+                InlineKeyboardButton reviewButton = new InlineKeyboardButton();
+                reviewButton.setText("2️⃣ Оставить отзыв ✅");
+                reviewButton.setUrl(reviewUrl);
+                rows.add(List.of(reviewButton));
+            } catch (Exception e) {
+                System.err.println("Ошибка при создании ссылки на отзыв: " + e.getMessage());
+            }
+        }
+        
+        if (purchase.getCashbackMessageId() != null) {
+            try {
+                ResourceBundle rb = ResourceBundle.getBundle("app");
+                String groupIdStr = rb.getString("tg.group");
+                
+                // Убираем префикс "-100" если он есть
+                String cleanGroupId = groupIdStr;
+                if (groupIdStr.startsWith("-100")) {
+                    cleanGroupId = groupIdStr.substring(4);
+                } else if (groupIdStr.startsWith("100")) {
+                    cleanGroupId = groupIdStr.substring(3);
+                }
+                
+                String cashbackUrl = "https://t.me/c/" + cleanGroupId + "/" + purchase.getCashbackMessageId();
+                
+                InlineKeyboardButton cashbackButton = new InlineKeyboardButton();
+                cashbackButton.setText("3️⃣ Получить кешбек ✅");
+                cashbackButton.setUrl(cashbackUrl);
+                rows.add(List.of(cashbackButton));
+            } catch (Exception e) {
+                System.err.println("Ошибка при создании ссылки на кешбек: " + e.getMessage());
+            }
+        }
+        
+        // Кнопка "Назад"
+        InlineKeyboardButton backButton = new InlineKeyboardButton();
+        backButton.setText("⬅️ Назад к покупателям");
+        backButton.setCallbackData("admin_back_to_purchases_" + purchase.getProduct().getIdProduct());
+        rows.add(List.of(backButton));
+        
+        keyboard.setKeyboard(rows);
+        
+        SendMessage message = new SendMessage();
+        message.setReplyMarkup(keyboard);
+        
+        Sent sent = new Sent();
+        sent.sendMessage(admin, text, message);
+    }
+
+    /**
+     * Показать статистику
+     */
+    public void showStats(User admin) {
+        PurchaseDAO purchaseDAO = new PurchaseDAO();
+        ProductDAO productDAO = new ProductDAO();
+        List<Purchase> allPurchases = purchaseDAO.findAll();
+        List<Product> allProducts = productDAO.findAll();
+        
+        int totalPurchases = allPurchases.size();
+        int totalProducts = allProducts.size();
+        
+        String text = "📊 Статистика системы:\n\n" +
+                     "📦 Всего товаров: " + totalProducts + "\n" +
+                     "🛒 Всего покупок: " + totalPurchases + "\n" +
+                     "👥 Уникальных покупателей: " + 
+                     allPurchases.stream().map(Purchase::getUser).distinct().count();
+        
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+        
+        // Кнопка "Назад"
+        InlineKeyboardButton backButton = new InlineKeyboardButton();
+        backButton.setText("⬅️ Назад в админ-меню");
+        backButton.setCallbackData("admin_back_to_menu");
+        
+        rows.add(List.of(backButton));
+        
+        keyboard.setKeyboard(rows);
+        
+        SendMessage message = new SendMessage();
+        message.setReplyMarkup(keyboard);
+        
+        Sent sent = new Sent();
+        sent.sendMessage(admin, text, message);
+    }
+
+    /**
+     * Обновить статистику (edit message)
+     */
+    public void updateStats(User admin, int messageId) {
+        PurchaseDAO purchaseDAO = new PurchaseDAO();
+        ProductDAO productDAO = new ProductDAO();
+        List<Purchase> allPurchases = purchaseDAO.findAll();
+        List<Product> allProducts = productDAO.findAll();
+        
+        int totalPurchases = allPurchases.size();
+        int totalProducts = allProducts.size();
+        
+        String text = "📊 Статистика системы:\n\n" +
+                     "📦 Всего товаров: " + totalProducts + "\n" +
+                     "🛒 Всего покупок: " + totalPurchases + "\n" +
+                     "👥 Уникальных покупателей: " + 
+                     allPurchases.stream().map(Purchase::getUser).distinct().count();
+        
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+        
+        // Кнопка "Назад"
+        InlineKeyboardButton backButton = new InlineKeyboardButton();
+        backButton.setText("⬅️ Назад в админ-меню");
+        backButton.setCallbackData("admin_back_to_menu");
+        
+        rows.add(List.of(backButton));
+        
+        keyboard.setKeyboard(rows);
+        
+        Sent sent = new Sent();
+        sent.editMessageMarkup(admin, messageId, text, null);
+    }
+
+    /**
+     * Показать настройки админа
+     */
+    public void showSettings(User admin) {
+        AdminSettings settings = AdminSettings.getInstance();
+        String supportMention = settings.getSupportMention();
+        
+        String text = "⚙️ Настройки администратора:\n\n" +
+                     "🆘 Техподдержка: " + supportMention + "\n\n" +
+                     "Выберите настройку для изменения:";
+        
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+        
+        // Кнопка "Изменить техподдержку"
+        InlineKeyboardButton supportButton = new InlineKeyboardButton();
+        supportButton.setText("🆘 Изменить техподдержку");
+        supportButton.setCallbackData("admin_change_support");
+        
+        // Кнопка "Назад"
+        InlineKeyboardButton backButton = new InlineKeyboardButton();
+        backButton.setText("⬅️ Назад в админ-меню");
+        backButton.setCallbackData("admin_back_to_menu");
+        
+        rows.add(List.of(supportButton));
+        rows.add(List.of(backButton));
+        
+        keyboard.setKeyboard(rows);
+        
+        SendMessage message = new SendMessage();
+        message.setReplyMarkup(keyboard);
+        
+        Sent sent = new Sent();
+        sent.sendMessage(admin, text, message);
+    }
+
+    /**
+     * Обновить настройки админа (edit message)
+     */
+    public void updateSettings(User admin, int messageId) {
+        AdminSettings settings = AdminSettings.getInstance();
+        String supportMention = settings.getSupportMention();
+        
+        String text = "⚙️ Настройки администратора:\n\n" +
+                     "🆘 Техподдержка: " + supportMention + "\n\n" +
+                     "Выберите настройку для изменения:";
+        
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+        
+        // Кнопка "Изменить техподдержку"
+        InlineKeyboardButton supportButton = new InlineKeyboardButton();
+        supportButton.setText("🆘 Изменить техподдержку");
+        supportButton.setCallbackData("admin_change_support");
+        
+        // Кнопка "Назад"
+        InlineKeyboardButton backButton = new InlineKeyboardButton();
+        backButton.setText("⬅️ Назад в админ-меню");
+        backButton.setCallbackData("admin_back_to_menu");
+        
+        rows.add(List.of(supportButton));
+        rows.add(List.of(backButton));
+        
+        keyboard.setKeyboard(rows);
+        
+        Sent sent = new Sent();
+        sent.editMessageMarkup(admin, messageId, text, null);
+    }
+
+    /**
+     * Получить текст статуса покупки
+     */
+    private String getPurchaseStageText(int stage) {
+        return switch (stage) {
+            case 0: yield "🛒 Заказан";
+            case 1: yield "📦 В пути";
+            case 2: yield "🏠 Доставлен";
+            case 3: yield "🏠 Доставлена";
+            default: yield "❓ Неизвестно";
+        };
+    }
+
+    /**
+     * Показать меню добавления товара
+     */
+    public void showAddProductMenu(User admin) {
+        String text = "➕ Добавление нового товара:\n\n" +
+                     "Введите артикул товара:";
+        
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+        
+        // Кнопка "Назад"
+        InlineKeyboardButton backButton = new InlineKeyboardButton();
+        backButton.setText("⬅️ Назад в админ-меню");
+        backButton.setCallbackData("admin_back_to_menu");
+        
+        rows.add(List.of(backButton));
+        
+        keyboard.setKeyboard(rows);
+        
+        SendMessage message = new SendMessage();
+        message.setReplyMarkup(keyboard);
+        
+        Sent sent = new Sent();
+        sent.sendMessage(admin, text, message);
+    }
+
+    /**
+     * Показать меню управления пользователями
+     */
+    public void showUserManagementMenu(User admin) {
+        // Получаем список всех админов
+        UserDAO userDAO = new UserDAO();
+        List<User> admins = userDAO.findAllAdmins();
+        
+        String text = "👥 Управление админами:\n\n";
+        
+        if (admins.isEmpty()) {
+            text += "❌ Админы не найдены";
+        } else {
+            text += "👑 Список админов:\n";
+            for (int i = 0; i < admins.size(); i++) {
+                User adminUser = admins.get(i);
+                String username = adminUser.getUsername() != null ? "@" + adminUser.getUsername() : "Без username";
+                text += (i + 1) + ". " + username + "\n";
+            }
+        }
+        
+        text += "\nВыберите действие:";
+        
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+        
+        // Кнопка "Добавить админа"
+        InlineKeyboardButton addAdminButton = new InlineKeyboardButton();
+        addAdminButton.setText("➕ Добавить админа");
+        addAdminButton.setCallbackData("admin_add_admin");
+        
+        // Кнопка "Назад"
+        InlineKeyboardButton backButton = new InlineKeyboardButton();
+        backButton.setText("⬅️ Назад в админ-меню");
+        backButton.setCallbackData("admin_back_to_admin_menu");
+        
+        rows.add(List.of(addAdminButton));
+        rows.add(List.of(backButton));
+        
+        keyboard.setKeyboard(rows);
+        
+        SendMessage message = new SendMessage();
+        message.setReplyMarkup(keyboard);
+        
+        Sent sent = new Sent();
+        sent.sendMessage(admin, text, message);
+    }
+    
+    /**
+     * Показать меню редактирования товара
+     */
+    public void showEditProductMenu(User admin, int productId) {
+        ProductDAO productDAO = new ProductDAO();
+        Product product = productDAO.findById(productId);
+        
+        if (product == null) {
+            Sent sent = new Sent();
+            sent.sendMessage(admin, "❌ Товар не найден");
+            return;
+        }
+        
+        String text = "✏️ Редактирование товара:\n\n" +
+                     "📦 Название: " + product.getProductName() + "\n" +
+                     "🔢 Артикул: " + product.getArticul() + "\n" +
+                     "💰 Кэшбэк: " + product.getCashbackPercentage() + "%\n" +
+                     "🔍 Ключевой запрос: " + product.getKeyQuery() + "\n" +
+                     "📝 Условия: " + product.getAdditionalСonditions() + "\n" +
+                     "📷 Фотография: " + (product.getPhoto() != null ? "Загружена" : "Не загружена") + "\n" +
+                     "👁️ Видимость: " + (product.isVisible() ? "Видимый" : "Скрытый") + "\n\n" +
+                     "Выберите что редактировать:";
+        
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
+        
+        // Кнопки редактирования
+        InlineKeyboardButton nameButton = new InlineKeyboardButton();
+        nameButton.setText("📦 Название");
+        nameButton.setCallbackData("admin_edit_product_name_" + productId);
+        
+        InlineKeyboardButton articulButton = new InlineKeyboardButton();
+        articulButton.setText("🔢 Артикул");
+        articulButton.setCallbackData("admin_edit_product_articul_" + productId);
+        
+        InlineKeyboardButton cashbackButton = new InlineKeyboardButton();
+        cashbackButton.setText("💰 Кэшбэк");
+        cashbackButton.setCallbackData("admin_edit_product_cashback_" + productId);
+        
+        InlineKeyboardButton queryButton = new InlineKeyboardButton();
+        queryButton.setText("🔍 Ключевой запрос");
+        queryButton.setCallbackData("admin_edit_product_query_" + productId);
+        
+        InlineKeyboardButton conditionsButton = new InlineKeyboardButton();
+        conditionsButton.setText("📝 Условия");
+        conditionsButton.setCallbackData("admin_edit_product_conditions_" + productId);
+        
+        InlineKeyboardButton photoButton = new InlineKeyboardButton();
+        photoButton.setText("📷 Фотография");
+        photoButton.setCallbackData("admin_edit_product_photo_" + productId);
+        
+        InlineKeyboardButton visibilityButton = new InlineKeyboardButton();
+        visibilityButton.setText("👁️ Видимость");
+        visibilityButton.setCallbackData("admin_edit_product_visibility_" + productId);
+        
+        // Кнопка "Назад"
+        InlineKeyboardButton backButton = new InlineKeyboardButton();
+        backButton.setText("⬅️ Назад к товарам");
+        backButton.setCallbackData("admin_back_to_products");
+        
+        rows.add(List.of(nameButton));
+        rows.add(List.of(articulButton));
+        rows.add(List.of(cashbackButton));
+        rows.add(List.of(queryButton));
+        rows.add(List.of(conditionsButton));
+        rows.add(List.of(photoButton));
+        rows.add(List.of(visibilityButton));
+        rows.add(List.of(backButton));
+        
+        keyboard.setKeyboard(rows);
+        
+        SendMessage message = new SendMessage();
+        message.setReplyMarkup(keyboard);
+        
+        Sent sent = new Sent();
+        sent.sendMessage(admin, text, message);
     }
 }

@@ -22,9 +22,24 @@ public class Purchase {
 
     @Column(name = "date", nullable = false)
     private LocalDate date;
+    
+    @Column(name = "orderTime")
+    private java.time.LocalTime orderTime;
 
     @Column(name = "purchaseStage", nullable = false)
     private int purchaseStage;
+
+    @Column(name = "groupMessageId")
+    private Long groupMessageId;
+    
+    @Column(name = "orderMessageId")
+    private Long orderMessageId;  // Этап 1: товар заказан
+    
+    @Column(name = "reviewMessageId")
+    private Long reviewMessageId;  // Этап 2: оставить отзыв
+    
+    @Column(name = "cashbackMessageId")
+    private Long cashbackMessageId;  // Этап 3: получить кешбек
 
     public int getIdPurchase() {
         return idPurchase;
@@ -57,6 +72,14 @@ public class Purchase {
     public void setDate(LocalDate date) {
         this.date = date;
     }
+    
+    public java.time.LocalTime getOrderTime() {
+        return orderTime;
+    }
+    
+    public void setOrderTime(java.time.LocalTime orderTime) {
+        this.orderTime = orderTime;
+    }
 
     public int getPurchaseStage() {
         return purchaseStage;
@@ -64,5 +87,37 @@ public class Purchase {
 
     public void setPurchaseStage(int purchaseStage) {
         this.purchaseStage = purchaseStage;
+    }
+
+    public Long getGroupMessageId() {
+        return groupMessageId;
+    }
+
+    public void setGroupMessageId(Long groupMessageId) {
+        this.groupMessageId = groupMessageId;
+    }
+    
+    public Long getOrderMessageId() {
+        return orderMessageId;
+    }
+    
+    public void setOrderMessageId(Long orderMessageId) {
+        this.orderMessageId = orderMessageId;
+    }
+    
+    public Long getReviewMessageId() {
+        return reviewMessageId;
+    }
+    
+    public void setReviewMessageId(Long reviewMessageId) {
+        this.reviewMessageId = reviewMessageId;
+    }
+    
+    public Long getCashbackMessageId() {
+        return cashbackMessageId;
+    }
+    
+    public void setCashbackMessageId(Long cashbackMessageId) {
+        this.cashbackMessageId = cashbackMessageId;
     }
 }

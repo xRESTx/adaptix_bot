@@ -49,18 +49,14 @@ public class TelegramBot extends TelegramLongPollingBot {
                         return;
                     }
                     if(update.getMessage().hasPhoto()){
-                        if((SessionStore.getProductSession(update.getMessage().getChatId())!=null && SessionStore.getProductSession(update.getMessage().getChatId()).getStep() == ProductCreationSession.Step.PHOTO)
-                                || SessionStore.getReviewSession(update.getMessage().getChatId())!=null && SessionStore.getReviewSession(update.getMessage().getChatId()).getStep() == ReviewRequestSession.Step.ORDER_SCREENSHOT){
-                            messageProcessing.handleUpdate(update);
-
-                        }else{
-                            messageProcessing.sentPhotoUpdate(update);
-                        }
+                        // Все фотографии обрабатываются формой покупки товара
+                        messageProcessing.handleUpdate(update);
                         return;
                     }
                     if (((update.hasMessage() && update.getMessage().hasText()) || update.getMessage().hasContact() )
                             || (SessionStore.getProductSession(update.getMessage().getChatId()).getStep() == ProductCreationSession.Step.PHOTO)
-                            || (SessionStore.getReviewSession(update.getMessage().getChatId()).getStep() == ReviewRequestSession.Step.ORDER_SCREENSHOT)) {
+                            || (SessionStore.getReviewSession(update.getMessage().getChatId()).getStep() == ReviewRequestSession.Step.SEARCH_SCREENSHOT)
+                            || (SessionStore.getReviewSession(update.getMessage().getChatId()).getStep() == ReviewRequestSession.Step.DELIVERY_SCREENSHOT)) {
                         messageProcessing.handleUpdate(update);
                         return;
                     }
@@ -174,7 +170,8 @@ public class TelegramBot extends TelegramLongPollingBot {
         try {
             execute(deleteMessage);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            // Логируем ошибку, но не выбрасываем исключение
+            System.err.println("Failed to delete message " + messageId + " in chat " + chatId + ": " + e.getMessage());
         }
     }
 }

@@ -26,6 +26,19 @@ dependencies {
     implementation 'jakarta.persistence:jakarta.persistence-api:3.1.0'
     implementation 'javax.xml.bind:jaxb-api:2.3.1'
     implementation 'org.glassfish.jaxb:jaxb-runtime:2.3.3'
+    
+    // HikariCP - самый быстрый connection pool
+    implementation 'com.zaxxer:HikariCP:5.0.1'
+    
+    // Redis для сессий и кэширования
+    implementation 'redis.clients:jedis:5.0.0'
+    
+    // Jackson для JSON сериализации сессий
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.15.2'
+    
+    // Метрики и мониторинг
+    implementation 'io.micrometer:micrometer-core:1.11.0'
+    implementation 'io.micrometer:micrometer-registry-prometheus:1.11.0'
 }
 
 test {

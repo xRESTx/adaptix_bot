@@ -1,10 +1,10 @@
 package org.example.dao;
 
+import org.example.database.DatabaseManager;
 import org.example.table.User;
 import org.hibernate.Session;
 import org.hibernate.SessionFactory;
 import org.hibernate.Transaction;
-import org.hibernate.cfg.Configuration;
 import org.hibernate.query.Query;
 
 import java.util.List;
@@ -14,11 +14,8 @@ public class UserDAO {
     private final SessionFactory sessionFactory;
 
     public UserDAO() {
-        try {
-            sessionFactory = new Configuration().configure().buildSessionFactory();
-        } catch (Throwable ex) {
-            throw new ExceptionInInitializerError("Ошибка создания SessionFactory: " + ex);
-        }
+        // Используем централизованный DatabaseManager вместо создания новой SessionFactory
+        this.sessionFactory = DatabaseManager.getInstance().getSessionFactory();
     }
 
     public void save(User user) {
@@ -48,6 +45,12 @@ public class UserDAO {
     public List<User> findAll() {
         try (Session session = sessionFactory.openSession()) {
             return session.createQuery("FROM Users", User.class).list();
+        }
+    }
+    
+    public List<User> findAllAdmins() {
+        try (Session session = sessionFactory.openSession()) {
+            return session.createQuery("FROM Users WHERE isAdmin = true", User.class).list();
         }
     }
 
@@ -106,9 +109,8 @@ public class UserDAO {
         }
     }
 
-    public void close() {
-        sessionFactory.close();
-    }
+    // Удаляем метод close() - теперь управление жизненным циклом SessionFactory 
+    // происходит в DatabaseManager
 
     // Вспомогательный метод для управления транзакциями
     private void executeInsideTransaction(SessionAction action) {

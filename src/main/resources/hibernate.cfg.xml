@@ -11,12 +11,31 @@
         <property name="hibernate.connection.username">postgres</property>
         <property name="hibernate.connection.password"></property>
 
+        <!-- HikariCP Connection Pool - самый быстрый для Java -->
+        <property name="hibernate.connection.provider_class">com.zaxxer.hikari.hibernate.HikariConnectionProvider</property>
+        <property name="hibernate.hikari.maximumPoolSize">20</property>
+        <property name="hibernate.hikari.minimumIdle">5</property>
+        <property name="hibernate.hikari.connectionTimeout">30000</property>
+        <property name="hibernate.hikari.idleTimeout">600000</property>
+        <property name="hibernate.hikari.maxLifetime">1800000</property>
+        <property name="hibernate.hikari.leakDetectionThreshold">60000</property>
+
         <!-- Автоматическое создание таблиц -->
         <property name="hibernate.hbm2ddl.auto">update</property>
 
-        <!-- Логгирование -->
-        <property name="hibernate.show_sql">true</property>
+        <!-- Логгирование (отключено в продакшене) -->
+        <property name="hibernate.show_sql">false</property>
         <property name="hibernate.format_sql">true</property>
+
+        <!-- Кэширование второго уровня (отключено для упрощения) -->
+        <property name="hibernate.cache.use_second_level_cache">false</property>
+        <property name="hibernate.cache.use_query_cache">false</property>
+
+        <!-- Оптимизация производительности -->
+        <property name="hibernate.jdbc.batch_size">20</property>
+        <property name="hibernate.order_inserts">true</property>
+        <property name="hibernate.order_updates">true</property>
+        <property name="hibernate.jdbc.batch_versioned_data">true</property>
 
         <!-- Указываем классы-сущности -->
         <mapping class="org.example.table.Photo"/>

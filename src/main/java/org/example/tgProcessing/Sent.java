@@ -6,6 +6,7 @@ import org.example.telegramBots.TelegramBotLogs;
 import org.telegram.telegrambots.meta.api.methods.CopyMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
+import org.telegram.telegrambots.meta.api.methods.send.SendVideo;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageReplyMarkup;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.InputFile;
@@ -55,7 +56,7 @@ public class Sent {
         return sentMessage;
     }
 
-    public void sendMessageGroup(User user,String text, String filePath){
+    public Long sendMessageGroup(User user,String text, String filePath){
         ResourceBundle rb = ResourceBundle.getBundle("app");
         long groupID = Long.parseLong(rb.getString("tg.group"));
         if(filePath == null){
@@ -64,7 +65,8 @@ public class Sent {
             sendGroup.setText(text);
             sendGroup.setParseMode("HTML");
             sendGroup.setMessageThreadId(user.getId_message());
-            telegramBotLogs.trySendMessage(sendGroup);
+            Message sentMessage = telegramBotLogs.trySendMessage(sendGroup);
+            return sentMessage != null ? (long) sentMessage.getMessageId() : null;
         }else {
             SendPhoto sendPhoto = new SendPhoto();
             sendPhoto.setChatId(groupID);
@@ -74,13 +76,14 @@ public class Sent {
             File file = new File(filePath);
             if (!file.exists()) {
                 System.out.println("File does not exist: " + filePath);
-                return;
+                return null;
             }
 
             InputFile inputFile = new InputFile(file);
             sendPhoto.setPhoto(inputFile);
 
-            telegramBotLogs.trySendPhoto(sendPhoto);
+            Message sentMessage = telegramBotLogs.trySendPhoto(sendPhoto);
+            return sentMessage != null ? (long) sentMessage.getMessageId() : null;
         }
     }
 
@@ -210,5 +213,92 @@ public class Sent {
         sendPhoto.setPhoto(inputFile);
 
         telegramBot.trySendPhoto(sendPhoto);
+    }
+
+    /**
+     * Отправка двух фотографий в группу с текстом
+     */
+    public Long sendTwoPhotosToGroup(User user, String text, String firstPhotoPath, String secondPhotoPath) {
+        ResourceBundle rb = ResourceBundle.getBundle("app");
+        long groupID = Long.parseLong(rb.getString("tg.group"));
+        
+        // Отправляем первое сообщение с текстом и первой фотографией
+        SendPhoto firstPhoto = new SendPhoto();
+        firstPhoto.setChatId(groupID);
+        firstPhoto.setCaption(text);
+        firstPhoto.setParseMode("HTML");
+        firstPhoto.setMessageThreadId(user.getId_message());
+
+        File firstFile = new File(firstPhotoPath);
+        if (!firstFile.exists()) {
+            System.out.println("First photo does not exist: " + firstPhotoPath);
+            return null;
+        }
+
+        InputFile firstInputFile = new InputFile(firstFile);
+        firstPhoto.setPhoto(firstInputFile);
+
+        Message firstMessage = telegramBotLogs.trySendPhoto(firstPhoto);
+        
+        // Отправляем вторую фотографию как медиа-группу
+        if (firstMessage != null && secondPhotoPath != null) {
+            File secondFile = new File(secondPhotoPath);
+            if (secondFile.exists()) {
+                SendPhoto secondPhoto = new SendPhoto();
+                secondPhoto.setChatId(groupID);
+                secondPhoto.setCaption("📦 Скриншот раздела доставки:");
+                secondPhoto.setParseMode("HTML");
+                secondPhoto.setMessageThreadId(user.getId_message());
+
+                InputFile secondInputFile = new InputFile(secondFile);
+                secondPhoto.setPhoto(secondInputFile);
+
+                telegramBotLogs.trySendPhoto(secondPhoto);
+            }
+        }
+        
+        return firstMessage != null ? (long) firstMessage.getMessageId() : null;
+    }
+    
+    /**
+     * Отправить сообщение в группу
+     */
+    public void sendMessageToGroup(long groupId, String text) {
+        SendMessage message = new SendMessage();
+        message.setChatId(groupId);
+        message.setText(text);
+        message.setParseMode("HTML");
+        
+        telegramBotLogs.trySendMessage(message);
+    }
+    
+    /**
+     * Переслать фотографию в группу
+     */
+    public void forwardPhotoToGroup(long groupId, String photoFileId) {
+        try {
+            SendPhoto sendPhoto = new SendPhoto();
+            sendPhoto.setChatId(groupId);
+            sendPhoto.setPhoto(new InputFile(photoFileId));
+            
+            telegramBotLogs.trySendPhoto(sendPhoto);
+        } catch (Exception e) {
+            System.err.println("Ошибка при пересылке фото в группу: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Переслать видео в группу
+     */
+    public void forwardVideoToGroup(long groupId, String videoFileId) {
+        try {
+            SendVideo sendVideo = new SendVideo();
+            sendVideo.setChatId(groupId);
+            sendVideo.setVideo(new InputFile(videoFileId));
+            
+            telegramBotLogs.trySendVideo(sendVideo);
+        } catch (Exception e) {
+            System.err.println("Ошибка при пересылке видео в группу: " + e.getMessage());
+        }
     }
 }

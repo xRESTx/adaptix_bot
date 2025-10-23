@@ -1,10 +1,10 @@
 package org.example.dao;
 
+import org.example.database.DatabaseManager;
 import org.example.table.Purchase;
 import org.hibernate.Session;
 import org.hibernate.SessionFactory;
 import org.hibernate.Transaction;
-import org.hibernate.cfg.Configuration;
 
 import java.util.List;
 
@@ -13,11 +13,8 @@ public class PurchaseDAO {
     private final SessionFactory sessionFactory;
 
     public PurchaseDAO() {
-        try {
-            sessionFactory = new Configuration().configure().buildSessionFactory();
-        } catch (Throwable ex) {
-            throw new ExceptionInInitializerError("Ошибка создания SessionFactory: " + ex);
-        }
+        // Используем централизованный DatabaseManager
+        this.sessionFactory = DatabaseManager.getInstance().getSessionFactory();
     }
 
     public void save(Purchase purchase) {
@@ -57,9 +54,33 @@ public class PurchaseDAO {
         }
     }
 
-    public void close() {
-        sessionFactory.close();
+    public List<Purchase> findByProductId(int productId) {
+        try (Session session = sessionFactory.openSession()) {
+            return session.createQuery("FROM Purchase p WHERE p.product.idProduct = :productId", Purchase.class)
+                    .setParameter("productId", productId)
+                    .list();
+        }
     }
+    
+    public Purchase findByUserAndProduct(org.example.table.User user, org.example.table.Product product) {
+        try (Session session = sessionFactory.openSession()) {
+            return session.createQuery("FROM Purchase p WHERE p.user = :user AND p.product = :product ORDER BY p.date DESC", Purchase.class)
+                    .setParameter("user", user)
+                    .setParameter("product", product)
+                    .setMaxResults(1)
+                    .uniqueResult();
+        }
+    }
+    
+    public List<Purchase> findByUserId(Long userId) {
+        try (Session session = sessionFactory.openSession()) {
+            return session.createQuery("FROM Purchase p WHERE p.user.idUser = :userId ORDER BY p.date DESC", Purchase.class)
+                    .setParameter("userId", userId)
+                    .list();
+        }
+    }
+
+    // Удаляем метод close() - управление жизненным циклом в DatabaseManager
 
     // Вспомогательный метод для управления транзакциями
     private void executeInsideTransaction(SessionAction action) {
