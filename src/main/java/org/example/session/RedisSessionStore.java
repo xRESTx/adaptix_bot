@@ -30,12 +30,14 @@ public class RedisSessionStore {
     private static final ConcurrentHashMap<Long, ProductCreationSession> memoryProducts = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<Long, ReviewRequestSession> memoryReviews = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<Long, ReviewSubmissionSession> memoryReviewSubmissions = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<Long, ReviewRejectionSession> memoryReviewRejections = new ConcurrentHashMap<>();
     
     // Префиксы для Redis ключей
     private static final String STATE_PREFIX = "session:state:";
     private static final String PRODUCT_PREFIX = "session:product:";
     private static final String REVIEW_PREFIX = "session:review:";
     private static final String REVIEW_SUBMISSION_PREFIX = "session:review_submission:";
+    private static final String REVIEW_REJECTION_PREFIX = "session:review_rejection:";
     
     /**
      * Получение состояния сессии
@@ -295,6 +297,65 @@ public class RedisSessionStore {
             // Silent fallback
         } finally {
             memoryReviewSubmissions.remove(chatId);
+        }
+    }
+    
+    /**
+     * Сохранение сессии отклонения отзыва
+     */
+    public static void setReviewRejectionSession(Long chatId, ReviewRejectionSession session) {
+        try {
+            String key = REVIEW_REJECTION_PREFIX + chatId;
+            String sessionJson = objectMapper.writeValueAsString(session);
+            redisManager.setSession(key, sessionJson);
+            
+            // Также сохраняем в память как fallback
+            memoryReviewRejections.put(chatId, session);
+            
+        } catch (JsonProcessingException e) {
+            // Silent fallback to memory
+            memoryReviewRejections.put(chatId, session);
+        } catch (Exception e) {
+            // Silent fallback to memory
+            memoryReviewRejections.put(chatId, session);
+        }
+    }
+    
+    /**
+     * Получение сессии отклонения отзыва
+     */
+    public static ReviewRejectionSession getReviewRejectionSession(Long chatId) {
+        try {
+            if (!redisManager.isHealthy()) {
+                return memoryReviewRejections.get(chatId);
+            }
+            
+            String key = REVIEW_REJECTION_PREFIX + chatId;
+            String sessionJson = redisManager.getSession(key);
+            
+            if (sessionJson != null) {
+                return objectMapper.readValue(sessionJson, ReviewRejectionSession.class);
+            }
+            
+            return null;
+            
+        } catch (Exception e) {
+            // Fallback to memory
+            return memoryReviewRejections.get(chatId);
+        }
+    }
+    
+    /**
+     * Удаление сессии отклонения отзыва
+     */
+    public static void removeReviewRejectionSession(Long chatId) {
+        try {
+            String key = REVIEW_REJECTION_PREFIX + chatId;
+            redisManager.deleteSession(key);
+        } catch (Exception e) {
+            // Silent fallback
+        } finally {
+            memoryReviewRejections.remove(chatId);
         }
     }
 }

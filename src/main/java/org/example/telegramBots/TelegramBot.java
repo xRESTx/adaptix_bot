@@ -42,17 +42,47 @@ public class TelegramBot extends TelegramLongPollingBot {
     public void onUpdatesReceived(List<Update> updates) {
         for(Update update : updates){
             executor.submit(()-> {
+                System.out.println("🔍 === TELEGRAM BOT UPDATE RECEIVED ===");
+                System.out.println("🔍 Update ID: " + update.getUpdateId());
+                System.out.println("🔍 Has callback query: " + update.hasCallbackQuery());
+                System.out.println("🔍 Has message: " + update.hasMessage());
+                if (update.hasMessage()) {
+                    System.out.println("🔍 Message chat ID: " + update.getMessage().getChatId());
+                    System.out.println("🔍 Message ID: " + update.getMessage().getMessageId());
+                    System.out.println("🔍 Chat type: " + update.getMessage().getChat().getType());
+                }
+                if (update.hasCallbackQuery()) {
+                    System.out.println("🔍 Callback query ID: " + update.getCallbackQuery().getId());
+                    System.out.println("🔍 Callback data: " + update.getCallbackQuery().getData());
+                    System.out.println("🔍 Callback chat ID: " + update.getCallbackQuery().getMessage().getChatId());
+                }
+                System.out.println("🔍 === END TELEGRAM BOT UPDATE LOG ===");
+                
                 MessageProcessing messageProcessing = threadLocalProcessing.get();
                 try {
                     if (update.hasCallbackQuery()) {
+                        System.out.println("🔍 === TELEGRAM BOT CALLBACK QUERY DETECTED ===");
+                        System.out.println("🔍 Update ID: " + update.getUpdateId());
+                        System.out.println("🔍 Callback data: " + update.getCallbackQuery().getData());
+                        System.out.println("🔍 Chat ID: " + update.getCallbackQuery().getMessage().getChatId());
+                        System.out.println("🔍 Message ID: " + update.getCallbackQuery().getMessage().getMessageId());
+                        System.out.println("🔍 === CALLING callBackQuery METHOD ===");
+                        
                         messageProcessing.callBackQuery(update);
                         return;
                     }
-                    if(update.getMessage().hasPhoto()){
-                        // Все фотографии обрабатываются формой покупки товара
+                    // Обрабатываем все типы медиа (фото, видео, документы, аудио, голосовые и т.д.)
+                    if(update.getMessage().hasPhoto() || update.getMessage().hasVideo() || 
+                       update.getMessage().hasDocument() || update.getMessage().hasVideoNote() ||
+                       update.getMessage().hasVoice() || update.getMessage().hasAudio() ||
+                       update.getMessage().hasSticker() || update.getMessage().hasContact() ||
+                       update.getMessage().hasLocation() || update.getMessage().hasPoll() ||
+                       update.getMessage().hasDice() || update.getMessage().hasInvoice() ||
+                       update.getMessage().hasSuccessfulPayment() || update.getMessage().hasPassportData()){
                         messageProcessing.handleUpdate(update);
                         return;
                     }
+                    // Обрабатываем текстовые сообщения и определенные состояния сессий
                     if (((update.hasMessage() && update.getMessage().hasText()) || update.getMessage().hasContact() )
                             || (SessionStore.getProductSession(update.getMessage().getChatId()).getStep() == ProductCreationSession.Step.PHOTO)
                             || (SessionStore.getReviewSession(update.getMessage().getChatId()).getStep() == ReviewRequestSession.Step.SEARCH_SCREENSHOT)

@@ -7,7 +7,6 @@ import org.example.table.Photo;
 import org.example.table.Purchase;
 import org.example.table.User;
 import org.example.telegramBots.TelegramBot;
-import org.example.tgProcessing.Sent;
 import org.telegram.telegrambots.meta.api.objects.PhotoSize;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
@@ -348,20 +347,10 @@ public class AsyncService {
                 purchase.setOrderTime(java.time.LocalTime.now());
                 purchase.setPurchaseStage(0);
                 purchase.setGroupMessageId(session.getGroupMessageId());
+                purchase.setOrderMessageId(session.getGroupMessageId()); // Устанавливаем orderMessageId
 
                 PurchaseDAO purchaseDAO = new PurchaseDAO();
                 purchaseDAO.save(purchase);
-                
-                // Сообщение в группу уже отправлено в MessageProcessing.java
-                // Здесь только сохраняем ID сообщения из сессии
-                System.out.println("🔍 Debug: session.getGroupMessageId() = " + session.getGroupMessageId());
-                if (session.getGroupMessageId() != null) {
-                    purchase.setOrderMessageId(session.getGroupMessageId());
-                    purchaseDAO.update(purchase);
-                    System.out.println("✅ Order message ID saved: " + session.getGroupMessageId());
-                } else {
-                    System.out.println("❌ Group message ID is null in session!");
-                }
 
                 // Создаем запись о фото поиска
                 Photo searchPhoto = new Photo();
@@ -480,5 +469,54 @@ public class AsyncService {
                 return null;
             }
         }, photoProcessingExecutor);
+    }
+    
+    /**
+     * Асинхронная обработка скриншота отзыва для получения кешбека
+     */
+    public static CompletableFuture<String> processCashbackScreenshotAsync(
+            Purchase purchase,
+            User user,
+            PhotoSize photo,
+            String fileId) {
+
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                System.out.println("🔄 Async cashback screenshot processing for user: " + user.getIdUser());
+
+                TelegramBot telegramBot = new TelegramBot();
+
+                // Создаем директорию для скриншотов кешбека
+                File reviewsDir = new File("reviews/");
+                if (!reviewsDir.exists()) {
+                    reviewsDir.mkdirs();
+                }
+
+                // Генерируем уникальное имя файла
+                String fileName = "cashback_" + purchase.getIdPurchase() + "_" + 
+                    new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss").format(new Date()) + ".jpg";
+                Path filePath = Paths.get("reviews/", fileName);
+
+                // Загружаем файл
+                telegramBot.downloadFile(fileId, filePath.toString());
+
+                // Создаем запись о фото кешбека
+                Photo cashbackPhoto = new Photo();
+                cashbackPhoto.setPurchase(purchase);
+                cashbackPhoto.setUser(user);
+                cashbackPhoto.setIdPhoto(fileName);
+
+                PhotoDAO photoDAO = new PhotoDAO();
+                photoDAO.save(cashbackPhoto);
+
+                System.out.println("✅ Cashback screenshot processed successfully: " + fileName);
+                return filePath.toString();
+
+            } catch (TelegramApiException | IOException e) {
+                System.err.println("❌ Cashback screenshot processing error: " + e.getMessage());
+                e.printStackTrace();
+                return null;
+            }
+        }, fileProcessingExecutor);
     }
 }

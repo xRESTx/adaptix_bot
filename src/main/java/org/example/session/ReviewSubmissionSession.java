@@ -9,11 +9,17 @@ public class ReviewSubmissionSession {
     private boolean videoReceived = false;
     private String[] photoFileIds = new String[4];
     private String videoFileId;
+    private String reviewText;
+    
+    // Для пересылки сообщений
+    private Integer[] photoMessageIds = new Integer[4];
+    private Integer videoMessageId;
+    private Long userChatId;
     
     public enum Step {
         INSTRUCTIONS,    // Показ инструкции
-        PHOTOS,          // Получение 4 фотографий
-        VIDEO,           // Получение 1 видео
+        TEXT,            // Получение текста отзыва
+        MEDIA,           // Получение медиа (фото и видео)
         COMPLETE         // Завершение
     }
     
@@ -52,6 +58,14 @@ public class ReviewSubmissionSession {
         }
     }
     
+    public void addPhotoWithMessageId(String photoFileId, Integer messageId) {
+        if (photosReceived < 4) {
+            photoFileIds[photosReceived] = photoFileId;
+            photoMessageIds[photosReceived] = messageId;
+            photosReceived++;
+        }
+    }
+    
     public String[] getPhotoFileIds() {
         return photoFileIds;
     }
@@ -74,6 +88,38 @@ public class ReviewSubmissionSession {
     
     public void setVideoFileId(String videoFileId) {
         this.videoFileId = videoFileId;
+    }
+    
+    public String getReviewText() {
+        return reviewText;
+    }
+    
+    public void setReviewText(String reviewText) {
+        this.reviewText = reviewText;
+    }
+    
+    public Integer[] getPhotoMessageIds() {
+        return photoMessageIds;
+    }
+    
+    public void setPhotoMessageIds(Integer[] photoMessageIds) {
+        this.photoMessageIds = photoMessageIds;
+    }
+    
+    public Integer getVideoMessageId() {
+        return videoMessageId;
+    }
+    
+    public void setVideoMessageId(Integer videoMessageId) {
+        this.videoMessageId = videoMessageId;
+    }
+    
+    public Long getUserChatId() {
+        return userChatId;
+    }
+    
+    public void setUserChatId(Long userChatId) {
+        this.userChatId = userChatId;
     }
     
     public boolean isComplete() {

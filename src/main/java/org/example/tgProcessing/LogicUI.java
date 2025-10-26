@@ -7,6 +7,8 @@ import org.example.table.Product;
 import org.example.table.Purchase;
 import org.example.table.User;
 import org.example.settings.AdminSettings;
+import org.example.session.ReviewSubmissionSession;
+import org.example.session.RedisSessionStore;
 import org.example.telegramBots.TelegramBot;
 import java.util.ResourceBundle;
 import org.example.telegramBots.TelegramBotLogs;
@@ -25,6 +27,7 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.Keyboard
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.io.File;
 
 public class LogicUI {
 
@@ -44,6 +47,7 @@ public class LogicUI {
         row2.add("Получить кешбек");
 
         KeyboardRow row3 = new KeyboardRow();
+        row3.add("Личный кабинет");
         if(user!=null && user.isAdmin()) {
             row3.add("Админ меню");
         }
@@ -145,6 +149,7 @@ public class LogicUI {
         createTelegramBot.sendReplyKeyboardMarkup(user,keyboardMarkup,"Отлично. Теперь введите ваш номер телефона:");
     }
     public void sendMenu(User user, String text){
+        System.out.println("🏠 sendMenu called for user: " + (user != null ? user.getUsername() : "null"));
         Sent sent = new Sent();
 
         KeyboardRow row1 = new KeyboardRow();
@@ -156,6 +161,7 @@ public class LogicUI {
         row2.add("Получить кешбек");
 
         KeyboardRow row3 = new KeyboardRow();
+        row3.add("Личный кабинет");
         if(user!=null && user.isAdmin()) {
             row3.add("Админ меню");
         }
@@ -167,11 +173,18 @@ public class LogicUI {
         SendMessage sendMessage = new SendMessage();
 
         sendMessage.setReplyMarkup(keyboardMarkup);
+        
+        String menuText = "🏠 <b>Главное меню</b>";
+        
+        System.out.println("🏠 Sending menu text: " + (text != null ? text : menuText));
+        
         if(text == null){
-            sent.sendMessageStart(user, "Выберите действие Меню", sendMessage);
+            sent.sendMessageStart(user, menuText, sendMessage);
         }else{
             sent.sendMessageStart(user, text, sendMessage);
         }
+        
+        System.out.println("🏠 Menu sent successfully");
     }
     public void sendMenuAgain(User user, Integer messageID){
         TelegramBot telegramBot = new TelegramBot();
@@ -186,9 +199,11 @@ public class LogicUI {
         row2.add("Получить кешбек");
 
         KeyboardRow row3 = new KeyboardRow();
+        row3.add("Личный кабинет");
         if(user!=null && user.isAdmin()) {
             row3.add("Админ меню");
         }
+        
         ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
         keyboardMarkup.setKeyboard(List.of(row1,row2,row3));
         keyboardMarkup.setResizeKeyboard(true);
@@ -202,9 +217,8 @@ public class LogicUI {
         SendMessage sendMessage = new SendMessage();
         ProductDAO productDAO = new ProductDAO();
 
-        List<Product> products = user.isAdmin()
-                ? productDAO.findAll()  // Админу показываем все товары
-                : productDAO.findAllVisible();  // Пользователю только видимые
+        // Каталог товаров всегда показывает только видимые товары (пользовательский режим)
+        List<Product> products = productDAO.findAllVisible();
         if(products.isEmpty()){
             sent.sendMessage(user,"К сожалению товаров на выкуп нет",sendMessage);
             return;
@@ -227,12 +241,6 @@ public class LogicUI {
             button.setText(product.getProductName() + "  " + product.getCashbackPercentage() + "% кешбек");
             button.setCallbackData("product_:" + product.getIdProduct() + ":" + messageId);
             rows.add(List.of(button));
-        }
-        if(user.isAdmin() && !user.isUserFlag()){
-            InlineKeyboardButton btnAddProduct = new InlineKeyboardButton();
-            btnAddProduct.setText("Добавить товар");
-            btnAddProduct.setCallbackData("addProduct:" + messageId);
-            rows.add(List.of(btnAddProduct));
         }
         InlineKeyboardButton back = new InlineKeyboardButton("⬅️ Назад");
         back.setCallbackData("Exit:" + messageId);
@@ -292,6 +300,278 @@ public class LogicUI {
 
         sent.editMessageMarkup(user, messageId, "📦 Выберите товар:", editMarkup);
     }
+    
+    /**
+     * Показать покупки пользователя для получения кешбека
+     */
+    public void showUserPurchases(User user) {
+        Sent sent = new Sent();
+        SendMessage sendMessage = new SendMessage();
+        PurchaseDAO purchaseDAO = new PurchaseDAO();
+        
+        // Получаем покупки пользователя, где отзыв уже оставлен (этап 2)
+        List<Purchase> purchases = purchaseDAO.findByUserId(user.getIdUser());
+        
+        // Отладочная информация
+        System.out.println("🔍 Debug: Total purchases for user " + user.getIdUser() + ": " + purchases.size());
+        for (Purchase purchase : purchases) {
+            System.out.println("🔍 Debug: Purchase ID " + purchase.getIdPurchase() + ", Stage: " + purchase.getPurchaseStage() + ", Product: " + purchase.getProduct().getProductName());
+        }
+        
+        // Фильтруем только те покупки, где отзыв уже оставлен, но кешбек еще не выплачен (purchaseStage >= 2 и < 4)
+        List<Purchase> eligiblePurchases = purchases.stream()
+                .filter(purchase -> {
+                    int stage = purchase.getPurchaseStage();
+                    boolean eligible = stage >= 2 && stage < 4;
+                    System.out.println("🔍 Debug: Purchase " + purchase.getIdPurchase() + " stage " + stage + " eligible: " + eligible);
+                    return eligible;
+                })
+                .collect(java.util.stream.Collectors.toList());
+        
+        System.out.println("🔍 Debug: Eligible purchases for cashback: " + eligiblePurchases.size());
+        
+        if (eligiblePurchases.isEmpty()) {
+            sent.sendMessage(user, "💸 У вас нет покупок, готовых для получения кешбека.\n\n" +
+                    "Для получения кешбека необходимо:\n" +
+                    "1️⃣ Заказать товар через «Каталог товаров»\n" +
+                    "2️⃣ Оставить отзыв через «Оставить отзыв»\n" +
+                    "3️⃣ Дождаться одобрения отзыва администратором\n\n" +
+                    "После этого здесь появится возможность получить кешбек!\n\n" +
+                    "💡 Если кешбек уже выплачен, он не будет отображаться в этом списке.", sendMessage);
+            return;
+        }
+        
+        // Создаем клавиатуру с кнопкой "Назад"
+        KeyboardRow backRow = new KeyboardRow();
+        backRow.add("⬅️ Назад");
+        
+        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
+        keyboardMarkup.setKeyboard(List.of(backRow));
+        keyboardMarkup.setResizeKeyboard(true);
+        keyboardMarkup.setOneTimeKeyboard(false);
+        sendMessage.setReplyMarkup(keyboardMarkup);
+        
+        // Отправляем первое сообщение с заголовком и кнопкой "Назад"
+        sent.sendMessage(user, "💸 <b>Раздел кешбека</b>", sendMessage);
+        
+        // Создаем второе сообщение с inline кнопками покупок
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        
+        for (Purchase purchase : eligiblePurchases) {
+            InlineKeyboardButton button = new InlineKeyboardButton();
+            String stageText = getPurchaseStageText(purchase.getPurchaseStage());
+            button.setText(purchase.getProduct().getProductName() + " - " + stageText);
+            button.setCallbackData("cashback_purchase:" + purchase.getIdPurchase());
+            rows.add(List.of(button));
+        }
+        
+        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+        markup.setKeyboard(rows);
+        
+        SendMessage inlineMessage = new SendMessage();
+        inlineMessage.setReplyMarkup(markup);
+        
+        // Отправляем второе сообщение с inline кнопками
+        sent.sendMessage(user, "Выберите покупку для получения кешбека:", inlineMessage);
+    }
+    
+    /**
+     * Показать личный кабинет пользователя
+     */
+    public void showUserCabinet(User user) {
+        Sent sent = new Sent();
+        PurchaseDAO purchaseDAO = new PurchaseDAO();
+        
+        // Получаем все покупки пользователя
+        List<Purchase> purchases = purchaseDAO.findByUserId(user.getIdUser());
+        
+        if (purchases.isEmpty()) {
+            sent.sendMessage(user, "👤 Личный кабинет\n\n" +
+                    "📦 У вас пока нет покупок.\n" +
+                    "Перейдите в «Каталог товаров» чтобы сделать первую покупку!");
+            return;
+        }
+        
+        // Формируем информацию о покупках
+        StringBuilder cabinetInfo = new StringBuilder();
+        cabinetInfo.append("👤 Личный кабинет\n\n");
+        
+        for (Purchase purchase : purchases) {
+            cabinetInfo.append("🗓️ Дата заказа: ")
+                    .append(formatDateTime(purchase.getDate(), purchase.getOrderTime()))
+                    .append("\n");
+            
+            cabinetInfo.append("📦 Товар: ")
+                    .append(purchase.getProduct().getProductName())
+                    .append("\n");
+            
+            cabinetInfo.append("🔄 Статус отзыва: ")
+                    .append(getReviewStatusText(purchase.getPurchaseStage()))
+                    .append("\n");
+            
+            cabinetInfo.append("📸 Статус скриншота отзыва: ")
+                    .append(getScreenshotStatusText(purchase.getPurchaseStage()))
+                    .append("\n");
+            
+            cabinetInfo.append("💰 Статус выплаты: ")
+                    .append(getPaymentStatusText(purchase.getPurchaseStage()))
+                    .append("\n\n");
+        }
+        
+        sent.sendMessage(user, cabinetInfo.toString());
+    }
+    
+    /**
+     * Показать товары пользователя для выбора отзыва
+     */
+    public void showUserProductsForReview(User user) {
+        Sent sent = new Sent();
+        PurchaseDAO purchaseDAO = new PurchaseDAO();
+        
+        // Получаем все покупки пользователя
+        List<Purchase> purchases = purchaseDAO.findByUserId(user.getIdUser());
+        
+        // Фильтруем покупки, где товар заказан и отзыв еще не оставлен
+        List<Purchase> eligiblePurchases = purchases.stream()
+                .filter(purchase -> purchase.getPurchaseStage() >= 0 && purchase.getPurchaseStage() < 2)
+                .collect(java.util.stream.Collectors.toList());
+        
+        if (eligiblePurchases.isEmpty()) {
+            sent.sendMessage(user, "📝 Оставить отзыв\n\n" +
+                    "❌ У вас нет товаров готовых для отзыва.\n\n" +
+                    "Для оставления отзыва необходимо:\n" +
+                    "1️⃣ Заказать товар через «Каталог товаров»\n" +
+                    "2️⃣ Дождаться подтверждения заказа\n\n" +
+                    "После этого здесь появится возможность оставить отзыв!");
+            return;
+        }
+        
+        // Если есть только один товар, сразу переходим к вводу текста отзыва
+        if (eligiblePurchases.size() == 1) {
+            Purchase purchase = eligiblePurchases.get(0);
+            
+            // Создаем клавиатуру с кнопкой "Назад"
+            KeyboardRow backRow = new KeyboardRow();
+            backRow.add("⬅️ Назад");
+            
+            ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
+            keyboardMarkup.setKeyboard(List.of(backRow));
+            keyboardMarkup.setResizeKeyboard(true);
+            keyboardMarkup.setOneTimeKeyboard(false);
+            
+            SendMessage sendMessage = new SendMessage();
+            sendMessage.setReplyMarkup(keyboardMarkup);
+            
+            // Отправляем сообщение о том, что пользователь оставляет отзыв на конкретный товар
+            String message = "📝 Вы оставляли заявку на товар: \"" + purchase.getProduct().getProductName() + "\"\n\n" +
+                    "Пожалуйста, напишите текст вашего отзыва о товаре 🖊";
+            
+            sent.sendMessage(user, message, sendMessage);
+            
+            // Создаем сессию подачи отзыва и устанавливаем состояние
+            ReviewSubmissionSession session = new ReviewSubmissionSession(purchase);
+            session.setStep(ReviewSubmissionSession.Step.TEXT); // Устанавливаем шаг для ввода текста
+            RedisSessionStore.setReviewSubmissionSession(user.getIdUser(), session);
+            RedisSessionStore.setState(user.getIdUser(), "REVIEW_SUBMISSION_TEXT"); // Специальное состояние для одного товара
+            
+            return;
+        }
+        
+        // Если товаров больше одного, показываем список для выбора
+        // Создаем клавиатуру с кнопкой "Назад"
+        KeyboardRow backRow = new KeyboardRow();
+        backRow.add("⬅️ Назад");
+        
+        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
+        keyboardMarkup.setKeyboard(List.of(backRow));
+        keyboardMarkup.setResizeKeyboard(true);
+        keyboardMarkup.setOneTimeKeyboard(false);
+        
+        SendMessage sendMessage = new SendMessage();
+        sendMessage.setReplyMarkup(keyboardMarkup);
+        
+        // Отправляем первое сообщение с заголовком и кнопкой "Назад"
+        sent.sendMessage(user, "📝 <b>Раздел отзывов</b>", sendMessage);
+        
+        // Создаем второе сообщение с inline кнопками товаров
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        
+        for (Purchase purchase : eligiblePurchases) {
+            InlineKeyboardButton button = new InlineKeyboardButton();
+            button.setText(purchase.getProduct().getProductName());
+            button.setCallbackData("review_product:" + purchase.getIdPurchase());
+            rows.add(List.of(button));
+        }
+        
+        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+        markup.setKeyboard(rows);
+        
+        SendMessage inlineMessage = new SendMessage();
+        inlineMessage.setReplyMarkup(markup);
+        
+        // Отправляем второе сообщение с inline кнопками
+        sent.sendMessage(user, "Выберите товар для оставления отзыва:", inlineMessage);
+    }
+    
+    /**
+     * Форматировать дату и время
+     */
+    private String formatDateTime(java.time.LocalDate date, java.time.LocalTime time) {
+        if (date == null) {
+            return "Не указано";
+        }
+        
+        String dateStr = String.format("%02d.%02d.%02d", 
+                date.getDayOfMonth(), date.getMonthValue(), date.getYear() % 100);
+        
+        if (time != null) {
+            String timeStr = String.format("%02d:%02d:%02d", 
+                    time.getHour(), time.getMinute(), time.getSecond());
+            return dateStr + " " + timeStr;
+        }
+        
+        return dateStr;
+    }
+    
+    /**
+     * Получить текст статуса отзыва
+     */
+    private String getReviewStatusText(int purchaseStage) {
+        switch (purchaseStage) {
+            case 0: return "Отзыв не оставлен";
+            case 1: return "Отзыв оставлен";
+            case 2: return "Отзыв утвержден";
+            case 3: return "Отзыв утвержден";
+            default: return "Неизвестный статус";
+        }
+    }
+    
+    /**
+     * Получить текст статуса скриншота отзыва
+     */
+    private String getScreenshotStatusText(int purchaseStage) {
+        switch (purchaseStage) {
+            case 0: return "Не требуется";
+            case 1: return "Не отправлен";
+            case 2: return "Отправлен";
+            case 3: return "Отправлен";
+            default: return "Неизвестный статус";
+        }
+    }
+    
+    /**
+     * Получить текст статуса выплаты
+     */
+    private String getPaymentStatusText(int purchaseStage) {
+        switch (purchaseStage) {
+            case 0: return "Не требуется";
+            case 1: return "Ожидание отзыва";
+            case 2: return "Ожидание выплаты";
+            case 3: return "Выплачено";
+            default: return "Неизвестный статус";
+        }
+    }
+    
     public void sendMessageBank(User user, String text){
         Sent sent = new Sent();
 
@@ -337,7 +617,7 @@ public class LogicUI {
         back.setCallbackData("Exit_Product:" + messageId);
         keyboard.add(List.of(back));
 
-        if(!user.isUserFlag() && user.isAdmin()){
+        if(false){ // Каталог товаров всегда показывает пользовательский интерфейс
             InlineKeyboardButton name = new InlineKeyboardButton("Наименование");
             name.setCallbackData("update_tariffs_name_" + selected.getIdProduct());
 
@@ -362,6 +642,7 @@ public class LogicUI {
             visible.setCallbackData("changeVisible_" + selected.getIdProduct());
             keyboard.add(Arrays.asList(name,description,price,term,discount,visible));
         } else {
+            // Каталог товаров всегда показывает пользовательский интерфейс
             InlineKeyboardButton buy = new InlineKeyboardButton("✅ Купить");
             buy.setCallbackData("buy_product:" + selected.getIdProduct());
             keyboard.add(List.of(buy));
@@ -372,6 +653,21 @@ public class LogicUI {
 
         TelegramBot telegramBot = new TelegramBot();
         telegramBot.deleteMessage(user.getIdUser(),messageId);
+
+        // Проверяем существование файла фотографии
+        File photoFile = new File(selected.getPhoto());
+        if (!photoFile.exists()) {
+            System.err.println("❌ Product photo file does not exist: " + selected.getPhoto());
+            // Отправляем только текст с кнопками без фотографии
+            SendMessage textMessage = new SendMessage();
+            textMessage.setChatId(String.valueOf(user.getIdUser()));
+            textMessage.setText(textProduct);
+            textMessage.setReplyMarkup(inlineMarkup);
+            textMessage.setParseMode("HTML");
+            
+            sent.sendMessageWithMarkup(user, textMessage);
+            return;
+        }
 
         SendPhoto sendPhoto = new SendPhoto();
         sendPhoto.setChatId(String.valueOf(user.getIdUser()));
@@ -411,6 +707,7 @@ public class LogicUI {
         row2.add("Получить кешбек");
 
         KeyboardRow row3 = new KeyboardRow();
+        row3.add("Личный кабинет");
         if(user!=null && user.isAdmin()) {
             row3.add("Админ меню");
         }
@@ -817,21 +1114,32 @@ public class LogicUI {
             timeText = "\n🕐 Время заказа: " + purchase.getOrderTime().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"));
         }
         
+        // Добавляем информацию об отзыве если он оставлен
+        String reviewInfo = "";
+        if (purchase.getPurchaseStage() >= 2) {
+            reviewInfo = "\n⭐ Отзыв: Оставлен";
+            if (purchase.getReviewMessageId() != null) {
+                reviewInfo += " ✅";
+            }
+        }
+        
         String text = "🛒 Детали покупки:\n\n" +
                      "👤 Пользователь: @" + purchase.getUser().getUsername() + "\n" +
                      "📦 Товар: " + purchase.getProduct().getProductName() + "\n" +
                      "📅 Дата: " + purchase.getDate() + timeText + "\n" +
-                     "📊 Статус: " + getPurchaseStageText(purchase.getPurchaseStage()) + "\n\n" +
+                     "📊 Статус: " + getPurchaseStageText(purchase.getPurchaseStage()) + reviewInfo + "\n\n" +
                      "📋 Этапы покупки:";
         
         InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
         List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
         
-        // Кнопки для переходов к сообщениям этапов (только для выполненных)
+        // Кнопки для переходов к сообщениям этапов (показываем все выполненные этапы)
+        System.out.println("🔍 Debug: PurchaseStage = " + purchase.getPurchaseStage());
         System.out.println("🔍 Debug: OrderMessageId = " + purchase.getOrderMessageId());
         System.out.println("🔍 Debug: ReviewMessageId = " + purchase.getReviewMessageId());
         System.out.println("🔍 Debug: CashbackMessageId = " + purchase.getCashbackMessageId());
         
+        // Этап 1: Товар заказан (всегда показываем как выполненный)
         if (purchase.getOrderMessageId() != null) {
             try {
                 ResourceBundle rb = ResourceBundle.getBundle("app");
@@ -845,62 +1153,92 @@ public class LogicUI {
                     cleanGroupId = groupIdStr.substring(3);
                 }
                 
+                // Формируем ссылку на сообщение в подгруппе пользователя
                 String orderUrl = "https://t.me/c/" + cleanGroupId + "/" + purchase.getOrderMessageId();
                 
                 InlineKeyboardButton orderButton = new InlineKeyboardButton();
                 orderButton.setText("1️⃣ Товар заказан ✅");
                 orderButton.setUrl(orderUrl);
                 rows.add(List.of(orderButton));
+                
+                System.out.println("🔗 Created order link: " + orderUrl + " for purchase ID: " + purchase.getIdPurchase());
             } catch (Exception e) {
                 System.err.println("Ошибка при создании ссылки на заказ: " + e.getMessage());
+                e.printStackTrace();
             }
+        } else {
+            // Показываем этап без ссылки если нет messageId
+            InlineKeyboardButton orderButton = new InlineKeyboardButton();
+            orderButton.setText("1️⃣ Товар заказан ✅");
+            orderButton.setCallbackData("no_message_available");
+            rows.add(List.of(orderButton));
+            
+            System.out.println("⚠️ No orderMessageId for purchase ID: " + purchase.getIdPurchase());
         }
         
-        if (purchase.getReviewMessageId() != null) {
-            try {
-                ResourceBundle rb = ResourceBundle.getBundle("app");
-                String groupIdStr = rb.getString("tg.group");
-                
-                // Убираем префикс "-100" если он есть
-                String cleanGroupId = groupIdStr;
-                if (groupIdStr.startsWith("-100")) {
-                    cleanGroupId = groupIdStr.substring(4);
-                } else if (groupIdStr.startsWith("100")) {
-                    cleanGroupId = groupIdStr.substring(3);
+        // Этап 2: Оставить отзыв (показываем как выполненный только если отзыв действительно оставлен)
+        if (purchase.getPurchaseStage() >= 2) {
+            if (purchase.getReviewMessageId() != null) {
+                try {
+                    ResourceBundle rb = ResourceBundle.getBundle("app");
+                    String groupIdStr = rb.getString("tg.group");
+                    
+                    // Убираем префикс "-100" если он есть
+                    String cleanGroupId = groupIdStr;
+                    if (groupIdStr.startsWith("-100")) {
+                        cleanGroupId = groupIdStr.substring(4);
+                    } else if (groupIdStr.startsWith("100")) {
+                        cleanGroupId = groupIdStr.substring(3);
+                    }
+                    
+                    String reviewUrl = "https://t.me/c/" + cleanGroupId + "/" + purchase.getReviewMessageId();
+                    
+                    InlineKeyboardButton reviewButton = new InlineKeyboardButton();
+                    reviewButton.setText("2️⃣ Оставить отзыв ✅");
+                    reviewButton.setUrl(reviewUrl);
+                    rows.add(List.of(reviewButton));
+                } catch (Exception e) {
+                    System.err.println("Ошибка при создании ссылки на отзыв: " + e.getMessage());
                 }
-                
-                String reviewUrl = "https://t.me/c/" + cleanGroupId + "/" + purchase.getReviewMessageId();
-                
+            } else {
+                // Показываем этап без ссылки если нет messageId
                 InlineKeyboardButton reviewButton = new InlineKeyboardButton();
                 reviewButton.setText("2️⃣ Оставить отзыв ✅");
-                reviewButton.setUrl(reviewUrl);
+                reviewButton.setCallbackData("no_message_available");
                 rows.add(List.of(reviewButton));
-            } catch (Exception e) {
-                System.err.println("Ошибка при создании ссылки на отзыв: " + e.getMessage());
             }
         }
         
-        if (purchase.getCashbackMessageId() != null) {
-            try {
-                ResourceBundle rb = ResourceBundle.getBundle("app");
-                String groupIdStr = rb.getString("tg.group");
-                
-                // Убираем префикс "-100" если он есть
-                String cleanGroupId = groupIdStr;
-                if (groupIdStr.startsWith("-100")) {
-                    cleanGroupId = groupIdStr.substring(4);
-                } else if (groupIdStr.startsWith("100")) {
-                    cleanGroupId = groupIdStr.substring(3);
+        // Этап 3: Получить кешбек (показываем как выполненный только если кешбек действительно запрошен)
+        if (purchase.getPurchaseStage() >= 3) {
+            if (purchase.getCashbackMessageId() != null) {
+                try {
+                    ResourceBundle rb = ResourceBundle.getBundle("app");
+                    String groupIdStr = rb.getString("tg.group");
+                    
+                    // Убираем префикс "-100" если он есть
+                    String cleanGroupId = groupIdStr;
+                    if (groupIdStr.startsWith("-100")) {
+                        cleanGroupId = groupIdStr.substring(4);
+                    } else if (groupIdStr.startsWith("100")) {
+                        cleanGroupId = groupIdStr.substring(3);
+                    }
+                    
+                    String cashbackUrl = "https://t.me/c/" + cleanGroupId + "/" + purchase.getCashbackMessageId();
+                    
+                    InlineKeyboardButton cashbackButton = new InlineKeyboardButton();
+                    cashbackButton.setText("3️⃣ Получить кешбек ✅");
+                    cashbackButton.setUrl(cashbackUrl);
+                    rows.add(List.of(cashbackButton));
+                } catch (Exception e) {
+                    System.err.println("Ошибка при создании ссылки на кешбек: " + e.getMessage());
                 }
-                
-                String cashbackUrl = "https://t.me/c/" + cleanGroupId + "/" + purchase.getCashbackMessageId();
-                
+            } else {
+                // Показываем этап без ссылки если нет messageId
                 InlineKeyboardButton cashbackButton = new InlineKeyboardButton();
                 cashbackButton.setText("3️⃣ Получить кешбек ✅");
-                cashbackButton.setUrl(cashbackUrl);
+                cashbackButton.setCallbackData("no_message_available");
                 rows.add(List.of(cashbackButton));
-            } catch (Exception e) {
-                System.err.println("Ошибка при создании ссылки на кешбек: " + e.getMessage());
             }
         }
         
