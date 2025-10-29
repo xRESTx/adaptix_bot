@@ -1033,27 +1033,49 @@ public class LogicUI {
      */
     public void showBlockUserInterface(User admin) {
         Sent sent = new Sent();
+        
+        // Создаем кнопку "Назад в админ меню"
+        InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        
+        InlineKeyboardButton backButton = new InlineKeyboardButton();
+        backButton.setText("⬅️ Назад в админ меню");
+        backButton.setCallbackData("admin_back_to_menu");
+        rows.add(List.of(backButton));
+        
+        keyboard.setKeyboard(rows);
+        
+        SendMessage message = new SendMessage();
+        message.setReplyMarkup(keyboard);
+        
         sent.sendMessage(admin, "🚫 <b>Блокировка пользователя</b>\n\n" +
                 "Введите username пользователя для блокировки (без @):\n\n" +
                 "Пример: <code>username123</code>\n\n" +
-                "⚠️ <b>Внимание:</b> При блокировке пользователя будут автоматически сняты все его брони товаров.");
+                "⚠️ <b>Внимание:</b> При блокировке пользователя будут автоматически сняты все его брони товаров.", message);
     }
     
     /**
      * Заблокировать пользователя с снятием всех броней
      */
     public void blockUser(User admin, String username) {
+        System.out.println("🔍 blockUser called: admin=" + admin.getUsername() + ", targetUsername=" + username);
+        
         try {
             UserDAO userDAO = new UserDAO();
+            System.out.println("🔍 Searching for user with username: " + username);
             User targetUser = userDAO.findByUsername(username);
             
             if (targetUser == null) {
+                System.out.println("🔍 User not found: " + username);
                 Sent sent = new Sent();
                 sent.sendMessage(admin, "❌ Пользователь с username <code>" + username + "</code> не найден.");
                 return;
             }
             
+            System.out.println("🔍 User found: " + targetUser.getIdUser() + ", username=" + targetUser.getUsername() + ", isAdmin=" + targetUser.isAdmin() + ", isBlock=" + targetUser.isBlock());
+            
             if (targetUser.isAdmin()) {
+                System.out.println("🔍 Cannot block admin");
                 Sent sent = new Sent();
                 sent.sendMessage(admin, "❌ Нельзя заблокировать администратора!");
                 return;
@@ -1081,32 +1103,42 @@ public class LogicUI {
             }
             
             // Снимаем все брони пользователя
+            System.out.println("🔍 Cancelling user reservations...");
             int cancelledReservations = cancelAllUserReservations(targetUser);
+            System.out.println("🔍 Cancelled reservations: " + cancelledReservations);
             
             // Блокируем пользователя
+            System.out.println("🔍 Blocking user...");
             targetUser.setBlock(true);
             userDAO.update(targetUser);
+            System.out.println("🔍 User blocked in DB");
             
             // Отправляем уведомление пользователю
+            System.out.println("🔍 Sending notification to blocked user...");
             Sent sent = new Sent();
             try {
                 sent.sendMessage(targetUser, "🚫 <b>Вы были заблокированы администратором</b>\n\n" +
                         "Ваш доступ к боту ограничен. Обратитесь к администратору для разблокировки.");
+                System.out.println("🔍 Notification sent to user");
             } catch (Exception e) {
                 System.err.println("❌ Failed to notify blocked user: " + e.getMessage());
             }
             
             // Отправляем подтверждение администратору
+            System.out.println("🔍 Sending confirmation to admin...");
             sent.sendMessage(admin, "✅ <b>Пользователь заблокирован</b>\n\n" +
                     "👤 Пользователь: <code>" + username + "</code>\n" +
                     "🆔 ID: <code>" + targetUser.getIdUser() + "</code>\n" +
                     "📦 Отменено броней: <code>" + cancelledReservations + "</code>\n\n" +
                     "Пользователь получил уведомление о блокировке.");
+            System.out.println("🔍 Confirmation sent to admin");
             
             System.out.println("🚫 User " + username + " (ID: " + targetUser.getIdUser() + ") blocked by admin " + admin.getUsername());
             
             // Возвращаемся в админ-меню
+            System.out.println("🔍 Showing admin menu...");
             showAdminMenu(admin);
+            System.out.println("🔍 Admin menu shown");
             
         } catch (Exception e) {
             System.err.println("❌ Error blocking user: " + e.getMessage());
@@ -1593,15 +1625,7 @@ public class LogicUI {
                 rows.add(List.of(cashbackButton));
             }
         }
-        
-        // Кнопка отмены покупки (только если покупка не завершена полностью)
-        if (purchase.getPurchaseStage() < 4) {
-            InlineKeyboardButton cancelButton = new InlineKeyboardButton();
-            cancelButton.setText("❌ Отменить покупку");
-            cancelButton.setCallbackData("admin_cancel_purchase_" + purchase.getIdPurchase());
-            rows.add(List.of(cancelButton));
-        }
-        
+
         // Кнопка "Назад"
         InlineKeyboardButton backButton = new InlineKeyboardButton();
         backButton.setText("⬅️ Назад к покупателям");

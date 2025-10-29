@@ -14,19 +14,7 @@ public class ReservationManager {
      */
     public static boolean incrementProductParticipants(int productId) {
         ProductDAO productDAO = new ProductDAO();
-        Product product = productDAO.findById(productId);
-        
-        if (product == null) {
-            return false;
-        }
-        
-        if (!product.hasAvailableSlots()) {
-            return false;
-        }
-        
-        product.incrementParticipants();
-        productDAO.update(product);
-        return true;
+        return productDAO.incrementParticipantsIfAvailablePessimistic(productId);
     }
     
     /**

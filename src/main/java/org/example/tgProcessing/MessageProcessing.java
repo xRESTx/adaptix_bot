@@ -584,7 +584,9 @@ public class MessageProcessing {
 
                         case PURCHASE_AMOUNT:
                             try {
-                                Integer sum = Integer.parseInt(msg.trim());
+                                String digits = msg.replaceAll("\\D", "");
+                                if (digits.isEmpty()) throw new NumberFormatException("empty amount");
+                                Integer sum = Integer.parseInt(digits);
 
                                 session.getRequest().setPurchaseAmount(String.valueOf(sum));
                                 session.setStep(ReviewRequestSession.Step.BANK_NAME);
@@ -592,7 +594,7 @@ public class MessageProcessing {
                                         "Укажите название банка, выпустившего карту:");
                                 break;
                             } catch (NumberFormatException e) {
-                                createTelegramBot.sendMessage(user, "Некорректная сумма. Пожалуйста, введите число.");
+                                createTelegramBot.sendMessage(user, "Некорректная сумма. Пожалуйста, введите число (например: 1999).");
                                 break;
                             }
 
@@ -1031,7 +1033,8 @@ public class MessageProcessing {
         }
         
         // Очищаем сессии только для пользователей (не для групповых чатов)
-        RedisSessionStore.clearAll(chatId);
+        // ВАЖНО: не очищаем все сессии здесь, чтобы не сбрасывать активные процессы (покупка/отзыв/кешбек)
+        // Очистка выполняется точечно в обработчиках навигации/отмены (back_to_menu, Exit_Product, "Отмена покупки товара" и т.п.)
         
 
         // Обработка админ-интерфейса
@@ -1180,6 +1183,16 @@ public class MessageProcessing {
                         break;
                     }
                     
+                    // Если уже есть активная заявка по этому товару — не начинаем заново
+                    ReviewRequestSession existing = RedisSessionStore.getReviewSession(chatId);
+                    if (existing != null && existing.getProduct() != null &&
+                        existing.getProduct().getIdProduct() == product.getIdProduct() &&
+                        existing.getStep() != ReviewRequestSession.Step.COMPLETE) {
+                        Sent sent = new Sent();
+                        sent.sendMessage(user, "⏳ Вы уже заполняете заявку на покупку этого товара. Продолжайте в текущем диалоге.");
+                        break;
+                    }
+                    
                     // Ограничение: не чаще 1 заказа в 14 дней (кроме администраторов)
                     if (!user.isAdmin()) {
                         PurchaseDAO purchaseDAO = new PurchaseDAO();
@@ -1226,6 +1239,12 @@ public class MessageProcessing {
                     boolean reserved = reservationService.reserveProduct(user, product);
                     
                     if (!reserved) {
+                        // Если бронь уже за этим пользователем — показываем корректное сообщение
+                        if (reservationService.isReservedByUser(user, product)) {
+                            Sent sent = new Sent();
+                            sent.sendMessage(user, "⏳ Вы уже заполняете заявку на покупку этого товара. Продолжайте в текущем диалоге.");
+                            break;
+                        }
                         Sent sent = new Sent();
                         sent.sendMessage(user, "❌ К сожалению, все товары в этой акции уже выкуплены или забронированы. " +
                                            "Попробуйте выбрать другой товар.");
@@ -2763,9 +2782,19 @@ public class MessageProcessing {
                 
                 // Уведомление в группу с пересылкой скриншота
                 try {
+                    Integer purchaseAmount = purchase.getPurchaseAmount();
+                    int percent = purchase.getProduct().getCashbackPercentage();
+                    String payoutText;
+                    if (purchaseAmount != null) {
+                        long payout = Math.round(purchaseAmount * (percent / 100.0));
+                        int payoutInt = (int) payout;
+                        payoutText = "💰 К выплате: <code>" + payoutInt + "</code> ₽\n";
+                    } else {
+                        payoutText = "💰 Размер кешбека: " + percent + "%\n";
+                    }
                     String text = "💸 Пользователь @" + user.getUsername() + " запросил кешбек!\n\n" +
                             "📦 Товар: " + purchase.getProduct().getProductName() + "\n" +
-                            "💰 Размер кешбека: " + purchase.getProduct().getCashbackPercentage() + "%\n" +
+                            payoutText +
                             "📅 Дата покупки: " + purchase.getDate() + "\n\n" +
                             "📸 Скриншот отзыва прикреплен ниже";
                     
@@ -3241,13 +3270,21 @@ public class MessageProcessing {
                 
                 // Уведомление в группу с пересылкой скриншота
                 try {
+                    Integer purchaseAmount = purchase.getPurchaseAmount();
+                    int percent = purchase.getProduct().getCashbackPercentage();
+                    String payoutText;
+                    if (purchaseAmount != null) {
+                        long payout = Math.round(purchaseAmount * (percent / 100.0));
+                        payoutText = "💰 К выплате: <code>" + payout + " ₽</code>\n";
+                    } else {
+                        payoutText = "💰 Размер кешбека: " + percent + "%\n";
+                    }
                     String text = "💸 Пользователь @" + user.getUsername() + " запросил кешбек!\n\n" +
                             "📦 Товар: " + purchase.getProduct().getProductName() + "\n" +
-                            "💰 Размер кешбека: " + purchase.getProduct().getCashbackPercentage() + "%\n" +
-                            "💳 Карта: <code>" + cashbackSession.getCardNumber() + "</code>\n" +
+                            payoutText +
                             "📅 Дата покупки: " + purchase.getDate() + "\n\n" +
                             "📸 Скриншот отзыва прикреплен ниже";
-
+                    
                     // Создаем кнопку "Оплачено"
                     List<List<InlineKeyboardButton>> rows = new ArrayList<>();
                     
@@ -3293,25 +3330,42 @@ public class MessageProcessing {
      * Обработка ввода username для блокировки пользователя
      */
     private void handleBlockUserInput(Update update, User admin) {
+        System.out.println("🔍 handleBlockUserInput called for admin: " + admin.getUsername());
+        
         String username = update.getMessage().getText();
         if (username == null) {
+            System.out.println("🔍 Username is null");
             Sent sent = new Sent();
             sent.sendMessage(admin, "❌ Введите корректный username пользователя без @");
+            RedisSessionStore.removeState(admin.getIdUser());
             return;
         }
+        
         username = username.trim();
         if (username.startsWith("@")) {
             username = username.substring(1);
         }
         if (username.isEmpty()) {
+            System.out.println("🔍 Username is empty after trim");
             Sent sent = new Sent();
             sent.sendMessage(admin, "❌ Username не может быть пустым. Попробуйте еще раз:");
             return;
         }
 
-        // Сбрасываем состояние и выполняем блокировку
+        System.out.println("🔍 Processing block for username: " + username);
+        
+        // Сбрасываем состояние перед обработкой
         RedisSessionStore.removeState(admin.getIdUser());
-        LogicUI logicUI = new LogicUI();
-        logicUI.blockUser(admin, username);
+        
+        try {
+            LogicUI logicUI = new LogicUI();
+            logicUI.blockUser(admin, username);
+            System.out.println("🔍 blockUser completed successfully");
+        } catch (Exception e) {
+            System.err.println("❌ Error in handleBlockUserInput: " + e.getMessage());
+            e.printStackTrace();
+            Sent sent = new Sent();
+            sent.sendMessage(admin, "❌ Произошла ошибка при блокировке пользователя: " + e.getMessage());
+        }
     }
 }

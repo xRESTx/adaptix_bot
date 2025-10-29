@@ -6,6 +6,7 @@ import org.hibernate.Session;
 import org.hibernate.SessionFactory;
 import org.hibernate.Transaction;
 import org.hibernate.query.Query;
+import org.hibernate.LockOptions;
 
 import java.util.List;
 
@@ -87,6 +88,34 @@ public class ProductDAO {
             query.setParameter("idProduct", id);
             query.executeUpdate();
             tx.commit();
+        }
+    }
+
+    /**
+     * Атомарное увеличение числа участников с пессимистичной блокировкой.
+     */
+    public boolean incrementParticipantsIfAvailablePessimistic(int productId) {
+        try (Session session = sessionFactory.openSession()) {
+            Transaction tx = session.beginTransaction();
+            try {
+                Product product = session.get(Product.class, productId, LockOptions.UPGRADE);
+                if (product == null) {
+                    tx.rollback();
+                    return false;
+                }
+                if (product.getNumberOfParticipants() < product.getNumberParticipants()) {
+                    product.setNumberOfParticipants(product.getNumberOfParticipants() + 1);
+                    session.merge(product);
+                    tx.commit();
+                    return true;
+                } else {
+                    tx.rollback();
+                    return false;
+                }
+            } catch (RuntimeException e) {
+                tx.rollback();
+                throw e;
+            }
         }
     }
 

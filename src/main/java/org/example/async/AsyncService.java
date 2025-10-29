@@ -89,6 +89,15 @@ public class AsyncService {
                 purchase.setDate(LocalDate.now());
                 purchase.setPurchaseStage(0);
                 purchase.setGroupMessageId(groupMessageId);
+                // Сохраняем сумму покупки, если указана в сессии
+                try {
+                    if (session.getRequest() != null && session.getRequest().getPurchaseAmount() != null) {
+                        String digits = session.getRequest().getPurchaseAmount().replaceAll("\\D", "");
+                        if (!digits.isEmpty()) {
+                            purchase.setPurchaseAmount(Integer.parseInt(digits));
+                        }
+                    }
+                } catch (NumberFormatException ignore) {}
                 
                 PurchaseDAO purchaseDAO = new PurchaseDAO();
                 purchaseDAO.save(purchase);
@@ -335,6 +344,15 @@ public class AsyncService {
                 purchase.setOrderTime(java.time.LocalTime.now());
                 purchase.setPurchaseStage(0);
                 // orderMessageId будет установлен в MessageProcessing после отправки сообщения
+                // Сохраняем сумму покупки, если указана в сессии
+                try {
+                    if (session.getRequest() != null && session.getRequest().getPurchaseAmount() != null) {
+                        String digits = session.getRequest().getPurchaseAmount().replaceAll("\\D", "");
+                        if (!digits.isEmpty()) {
+                            purchase.setPurchaseAmount(Integer.parseInt(digits));
+                        }
+                    }
+                } catch (NumberFormatException ignore) {}
 
                 PurchaseDAO purchaseDAO = new PurchaseDAO();
                 purchaseDAO.save(purchase);

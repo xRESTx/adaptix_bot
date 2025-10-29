@@ -77,7 +77,7 @@ public class PurchaseDAO {
                 // Оптимизированный запрос с JOIN для избежания N+1 проблемы
                 List<Object[]> results = session.createQuery(
                     "SELECT p.idPurchase, p.date, p.purchaseStage, p.groupMessageId, " +
-                    "p.orderMessageId, p.reviewMessageId, p.cashbackMessageId, p.cardNumber, " +
+                    "p.orderMessageId, p.reviewMessageId, p.cashbackMessageId, p.cardNumber, p.purchaseAmount, " +
                     "pr.idProduct, pr.productName, " +
                     "u.idUser, u.username " +
                     "FROM Purchase p " +
@@ -101,19 +101,20 @@ public class PurchaseDAO {
                         purchase.setReviewMessageId((Long) row[5]);
                         purchase.setCashbackMessageId((Long) row[6]);
                         purchase.setCardNumber((String) row[7]);
+                        purchase.setPurchaseAmount((Integer) row[8]);
 
                         // Создаем объекты Product и User из JOIN результатов
-                        if (row[8] != null) {
+                        if (row[9] != null) {
                             Product product = new Product();
-                            product.setIdProduct((Integer) row[8]);
-                            product.setProductName((String) row[9]);
+                            product.setIdProduct((Integer) row[9]);
+                            product.setProductName((String) row[10]);
                             purchase.setProduct(product);
                         }
 
-                        if (row[10] != null) {
+                        if (row[11] != null) {
                             User user = new User();
-                            user.setIdUser((Long) row[10]);
-                            user.setUsername((String) row[11]);
+                            user.setIdUser((Long) row[11]);
+                            user.setUsername((String) row[12]);
                             purchase.setUser(user);
                         }
 
@@ -147,7 +148,7 @@ public class PurchaseDAO {
                 // Используем простой запрос без orderTime для избежания ошибок
                 List<Object[]> results = session.createQuery(
                     "SELECT p.idPurchase, p.date, p.purchaseStage, p.groupMessageId, " +
-                    "p.orderMessageId, p.reviewMessageId, p.cashbackMessageId, p.cardNumber, " +
+                    "p.orderMessageId, p.reviewMessageId, p.cashbackMessageId, p.cardNumber, p.purchaseAmount, " +
                     "p.product.idProduct, p.user.idUser " +
                     "FROM Purchase p " +
                     "WHERE p.user.idUser = :userId " +
@@ -168,37 +169,38 @@ public class PurchaseDAO {
                         purchase.setReviewMessageId((Long) row[5]);
                         purchase.setCashbackMessageId((Long) row[6]);
                         purchase.setCardNumber((String) row[7]);
+                        purchase.setPurchaseAmount((Integer) row[8]);
                         
                         // Создаем объекты Product и User с минимальными данными
-                        if (row[8] != null) {
+                        if (row[9] != null) {
                             // Загружаем полную информацию о товаре
                             ProductDAO productDAO = new ProductDAO();
-                            Product product = productDAO.findById((Integer) row[8]);
+                            Product product = productDAO.findById((Integer) row[9]);
                             if (product != null) {
                                 System.out.println("🔍 Loaded product: " + product.getProductName() + " (ID: " + product.getIdProduct() + ")");
                                 purchase.setProduct(product);
                             } else {
                                 // Если товар не найден, создаем минимальный объект
-                                System.out.println("⚠️ Product not found for ID: " + row[8] + ", creating minimal object");
+                                System.out.println("⚠️ Product not found for ID: " + row[9] + ", creating minimal object");
                                 Product minimalProduct = new Product();
-                                minimalProduct.setIdProduct((Integer) row[8]);
+                                minimalProduct.setIdProduct((Integer) row[9]);
                                 minimalProduct.setProductName("Товар удален");
                                 purchase.setProduct(minimalProduct);
                             }
                         }
                         
-                        if (row[9] != null) {
+                        if (row[10] != null) {
                             // Загружаем полную информацию о пользователе
                             UserDAO userDAO = new UserDAO();
-                            User user = userDAO.findById((Long) row[9]);
+                            User user = userDAO.findById((Long) row[10]);
                             if (user != null) {
                                 System.out.println("🔍 Loaded user: " + user.getUsername() + " (ID: " + user.getIdUser() + ")");
                                 purchase.setUser(user);
                             } else {
                                 // Если пользователь не найден, создаем минимальный объект
-                                System.out.println("⚠️ User not found for ID: " + row[9] + ", creating minimal object");
+                                System.out.println("⚠️ User not found for ID: " + row[10] + ", creating minimal object");
                                 User minimalUser = new User();
-                                minimalUser.setIdUser((Long) row[9]);
+                                minimalUser.setIdUser((Long) row[10]);
                                 minimalUser.setUsername("Пользователь удален");
                                 purchase.setUser(minimalUser);
                             }
