@@ -1,6 +1,7 @@
 package org.example.session;
 
 import org.example.dao.ProductDAO;
+import org.example.table.Product;
 
 /**
  * Менеджер для управления количеством участников товаров
@@ -9,11 +10,23 @@ import org.example.dao.ProductDAO;
 public class ReservationManager {
     
     /**
-     * Увеличить количество участников товара (атомарно, с блокировкой)
+     * Увеличить количество участников товара
      */
     public static boolean incrementProductParticipants(int productId) {
         ProductDAO productDAO = new ProductDAO();
-        return productDAO.incrementParticipantsIfAvailablePessimistic(productId);
+        Product product = productDAO.findById(productId);
+        
+        if (product == null) {
+            return false;
+        }
+        
+        if (!product.hasAvailableSlots()) {
+            return false;
+        }
+        
+        product.incrementParticipants();
+        productDAO.update(product);
+        return true;
     }
     
     /**
@@ -21,7 +34,7 @@ public class ReservationManager {
      */
     public static boolean decrementProductParticipants(int productId) {
         ProductDAO productDAO = new ProductDAO();
-        var product = productDAO.findById(productId);
+        Product product = productDAO.findById(productId);
         
         if (product == null) {
             return false;
