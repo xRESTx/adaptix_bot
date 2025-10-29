@@ -6,6 +6,7 @@ import org.hibernate.Session;
 import org.hibernate.SessionFactory;
 import org.hibernate.Transaction;
 import org.hibernate.query.Query;
+import org.hibernate.LockOptions;
 
 import java.util.List;
 
@@ -34,12 +35,32 @@ public class ProductDAO {
 
     public List<Product> findAll() {
         try (Session session = sessionFactory.openSession()) {
-            return session.createQuery("FROM Product", Product.class).list();
+            List<Product> products = session.createQuery("FROM Product", Product.class).list();
+            System.out.println("🔍 findAll: Found " + products.size() + " total products in database");
+            // Убираем детальное логирование для каждого товара - это замедляет работу
+            return products;
         }
     }
     public List<Product> findAllVisible() {
         try (Session session = sessionFactory.openSession()) {
             return session.createQuery("FROM Product where visible = true", Product.class).list();
+        }
+    }
+
+    /**
+     * Получить все товары, доступные для покупки пользователями
+     * (видимые и с доступными местами в акции)
+     */
+    public List<Product> findAllAvailableForUsers() {
+        try (Session session = sessionFactory.openSession()) {
+            List<Product> products = session.createQuery(
+                "FROM Product WHERE visible = true AND numberOfParticipants < numberParticipants", 
+                Product.class
+            ).list();
+            
+            System.out.println("🔍 findAllAvailableForUsers: Found " + products.size() + " available products");
+            // Убираем детальное логирование для каждого товара - это замедляет работу
+            return products;
         }
     }
 
@@ -67,6 +88,36 @@ public class ProductDAO {
             query.setParameter("idProduct", id);
             query.executeUpdate();
             tx.commit();
+        }
+    }
+
+    /**
+     * Пессимистичная блокировка: атомарное увеличение числа участников, если есть место.
+     */
+    public boolean incrementParticipantsIfAvailablePessimistic(int productId) {
+        try (Session session = sessionFactory.openSession()) {
+            Transaction tx = session.beginTransaction();
+            try {
+                // Загружаем с блокировкой на запись
+                Product product = session.get(Product.class, productId, LockOptions.UPGRADE);
+                if (product == null) {
+                    tx.rollback();
+                    return false;
+                }
+                // Проверяем и увеличиваем внутри одной транзакции под блокировкой
+                if (product.getNumberOfParticipants() < product.getNumberParticipants()) {
+                    product.setNumberOfParticipants(product.getNumberOfParticipants() + 1);
+                    session.merge(product);
+                    tx.commit();
+                    return true;
+                } else {
+                    tx.rollback();
+                    return false;
+                }
+            } catch (RuntimeException e) {
+                tx.rollback();
+                throw e;
+            }
         }
     }
 

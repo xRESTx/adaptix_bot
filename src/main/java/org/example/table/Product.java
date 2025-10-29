@@ -38,8 +38,19 @@ public class Product {
     @Column(name="visible", nullable = false)
     private boolean visible;
 
+    @Column(name="groupMessageId")
+    private Long groupMessageId;
+
     public boolean isVisible() {
         return visible;
+    }
+
+    public Long getGroupMessageId() {
+        return groupMessageId;
+    }
+
+    public void setGroupMessageId(Long groupMessageId) {
+        this.groupMessageId = groupMessageId;
     }
 
     public void setVisible(boolean visible) {
@@ -116,5 +127,58 @@ public class Product {
 
     public void setAdditionalСonditions(String additionalСonditions) {
         this.additionalСonditions = additionalСonditions;
+    }
+
+    /**
+     * Проверить, доступен ли товар для покупки (не превышен лимит участников)
+     */
+    public boolean isAvailableForPurchase() {
+        return numberOfParticipants < numberParticipants;
+    }
+
+    /**
+     * Получить количество оставшихся мест в акции
+     */
+    public int getRemainingSlots() {
+        return Math.max(0, numberParticipants - numberOfParticipants);
+    }
+
+    /**
+     * Увеличить количество участников (при успешной покупке)
+     */
+    public void incrementParticipants() {
+        if (isAvailableForPurchase()) {
+            numberOfParticipants++;
+        }
+    }
+
+    /**
+     * Уменьшить количество участников (при отмене бронирования)
+     */
+    public void decrementParticipants() {
+        if (numberOfParticipants > 0) {
+            numberOfParticipants--;
+        }
+    }
+
+    /**
+     * Проверить, есть ли свободные места в акции
+     */
+    public boolean hasAvailableSlots() {
+        return getRemainingSlots() > 0;
+    }
+
+    /**
+     * Проверить, полностью ли выкуплен товар
+     */
+    public boolean isFullySold() {
+        return numberOfParticipants >= numberParticipants;
+    }
+
+    /**
+     * Проверить, должен ли товар быть видимым для пользователей
+     */
+    public boolean shouldBeVisibleToUsers() {
+        return visible && hasAvailableSlots();
     }
 }

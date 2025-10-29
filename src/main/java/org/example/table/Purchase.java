@@ -40,6 +40,12 @@ public class Purchase {
     
     @Column(name = "cashbackMessageId")
     private Long cashbackMessageId;  // Этап 3: получить кешбек
+    
+    @Column(name = "cardNumber")
+    private String cardNumber;  // Номер карты для кешбека
+
+    @Column(name = "purchaseAmount")
+    private Integer purchaseAmount; // Сумма покупки в рублях
 
     public int getIdPurchase() {
         return idPurchase;
@@ -119,5 +125,21 @@ public class Purchase {
     
     public void setCashbackMessageId(Long cashbackMessageId) {
         this.cashbackMessageId = cashbackMessageId;
+    }
+    
+    public String getCardNumber() {
+        return cardNumber;
+    }
+    
+    public void setCardNumber(String cardNumber) {
+        this.cardNumber = cardNumber;
+    }
+
+    public Integer getPurchaseAmount() {
+        return purchaseAmount;
+    }
+
+    public void setPurchaseAmount(Integer purchaseAmount) {
+        this.purchaseAmount = purchaseAmount;
     }
 }

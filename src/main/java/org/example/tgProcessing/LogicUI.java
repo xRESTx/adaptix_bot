@@ -9,9 +9,9 @@ import org.example.table.User;
 import org.example.settings.AdminSettings;
 import org.example.session.ReviewSubmissionSession;
 import org.example.session.RedisSessionStore;
+import org.example.session.ReservationService;
 import org.example.telegramBots.TelegramBot;
 import java.util.ResourceBundle;
-import org.example.telegramBots.TelegramBotLogs;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageReplyMarkup;
@@ -25,7 +25,6 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.Keyboard
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.io.File;
 
@@ -33,26 +32,32 @@ public class LogicUI {
 
     public void sendStart(long chatId,Update update) {
         Sent sent = new Sent();
-        TelegramBotLogs telegramBotLogs = new TelegramBotLogs();
+        TelegramBot telegramBot = new TelegramBot();
         UserDAO userDAO = new UserDAO();
 
         User user = userDAO.findById(chatId);
 
-        KeyboardRow row1 = new KeyboardRow();
-        row1.add("Каталог товаров");
-        row1.add("Оставить отзыв");
-
-        KeyboardRow row2 = new KeyboardRow();
-        row2.add("Техподдержка");
-        row2.add("Получить кешбек");
-
-        KeyboardRow row3 = new KeyboardRow();
-        row3.add("Личный кабинет");
-        if(user!=null && user.isAdmin()) {
-            row3.add("Админ меню");
-        }
         ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
-        keyboardMarkup.setKeyboard(List.of(row1,row2,row3));
+        if (user != null && user.isBlock()) {
+            KeyboardRow onlySupport = new KeyboardRow();
+            onlySupport.add("Техподдержка");
+            keyboardMarkup.setKeyboard(List.of(onlySupport));
+        } else {
+            KeyboardRow row1 = new KeyboardRow();
+            row1.add("Каталог товаров");
+            row1.add("Оставить отзыв");
+
+            KeyboardRow row2 = new KeyboardRow();
+            row2.add("Техподдержка");
+            row2.add("Получить кешбек");
+
+            KeyboardRow row3 = new KeyboardRow();
+            row3.add("Личный кабинет");
+            if(user!=null && user.isAdmin()) {
+                row3.add("Админ меню");
+            }
+            keyboardMarkup.setKeyboard(List.of(row1,row2,row3));
+        }
         keyboardMarkup.setResizeKeyboard(true);
         keyboardMarkup.setOneTimeKeyboard(false);
         SendMessage sendMessage = new SendMessage();
@@ -66,7 +71,7 @@ public class LogicUI {
             user.setBlock(false);
             user.setUserFlag(true);
             user.setUsername(update.getMessage().getFrom().getUserName());
-            List<Long> messageIdAndGroup = telegramBotLogs.createTopic(update);
+            List<Long> messageIdAndGroup = telegramBot.createTopic(update);
             user.setId_message(Math.toIntExact(messageIdAndGroup.getLast()));
 
             sent.sendMessageStart(user, user.getUsername() + ", Вас приветствует AdaptixBot", sendMessage);
@@ -217,9 +222,12 @@ public class LogicUI {
         SendMessage sendMessage = new SendMessage();
         ProductDAO productDAO = new ProductDAO();
 
-        // Каталог товаров всегда показывает только видимые товары (пользовательский режим)
-        List<Product> products = productDAO.findAllVisible();
+        // Получаем только товары, доступные для покупки пользователями
+        List<Product> products = productDAO.findAllAvailableForUsers();
+        System.out.println("🔍 sendProducts: Found " + products.size() + " products for user " + user.getIdUser());
+        
         if(products.isEmpty()){
+            System.out.println("⚠️ No products available for user " + user.getIdUser());
             sent.sendMessage(user,"К сожалению товаров на выкуп нет",sendMessage);
             return;
         }
@@ -237,15 +245,61 @@ public class LogicUI {
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
 
         for(Product product : products){
-            InlineKeyboardButton button = new InlineKeyboardButton();
-            button.setText(product.getProductName() + "  " + product.getCashbackPercentage() + "% кешбек");
-            button.setCallbackData("product_:" + product.getIdProduct() + ":" + messageId);
-            rows.add(List.of(button));
+            try {
+                System.out.println("🔍 Processing product: " + product.getProductName() + " (ID: " + product.getIdProduct() + ")");
+                
+                InlineKeyboardButton button = new InlineKeyboardButton();
+                
+                // Добавляем информацию о бронировании и количестве мест
+                String buttonText = product.getProductName() + "  " + product.getCashbackPercentage() + "% кешбек";
+                
+                // Добавляем информацию о количестве оставшихся мест
+                int remainingSlots = product.getRemainingSlots();
+                System.out.println("🔍 Remaining slots: " + remainingSlots);
+                
+                if (remainingSlots > 0) {
+                    buttonText += " (" + remainingSlots + " мест)";
+                } else {
+                    buttonText += " (закончился)";
+                }
+                
+                // Проверяем, покупал ли пользователь этот товар ранее
+                System.out.println("🔍 Checking if user has purchased product...");
+                boolean hasPurchased = hasUserPurchasedProduct(user.getIdUser(), product.getIdProduct());
+                System.out.println("🔍 User " + user.getIdUser() + " has purchased product " + product.getIdProduct() + ": " + hasPurchased);
+                
+            if (hasPurchased) {
+                // Проверяем, забронирован ли товар или куплен
+                ReservationService reservationService = ReservationService.getInstance();
+                User tempUser = new User();
+                tempUser.setIdUser(user.getIdUser());
+                Product tempProduct = new Product();
+                tempProduct.setIdProduct(product.getIdProduct());
+                
+                if (reservationService.isReservedByUser(tempUser, tempProduct)) {
+                    buttonText += " ⏰ (забронирован вами)";
+                } else {
+                    buttonText += " 🔒 (забронирован вами)";
+                }
+            }
+                
+                System.out.println("🔍 Button text: " + buttonText);
+                button.setText(buttonText);
+                button.setCallbackData("product_:" + product.getIdProduct() + ":" + messageId);
+                rows.add(List.of(button));
+                
+                System.out.println("🔍 Added button for product: " + product.getProductName());
+            } catch (Exception e) {
+                System.err.println("❌ Error processing product " + product.getIdProduct() + ": " + e.getMessage());
+                e.printStackTrace();
+            }
         }
         InlineKeyboardButton back = new InlineKeyboardButton("⬅️ Назад");
         back.setCallbackData("Exit:" + messageId);
         rows.add(List.of(back));
 
+        System.out.println("🔍 Total buttons created: " + rows.size());
+        
         InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
         markup.setKeyboard(rows);
 
@@ -254,6 +308,7 @@ public class LogicUI {
         editMarkup.setMessageId(messageId);
         editMarkup.setReplyMarkup(markup);
 
+        System.out.println("🔍 Sending keyboard with " + rows.size() + " rows to user " + user.getIdUser());
         sent.editMessageMarkup(user, messageId, "📦 Выберите товар:", editMarkup);
     }
     
@@ -425,18 +480,23 @@ public class LogicUI {
      * Показать товары пользователя для выбора отзыва
      */
     public void showUserProductsForReview(User user) {
+        System.out.println("🔍 DEBUG: showUserProductsForReview called for user " + user.getIdUser());
         Sent sent = new Sent();
         PurchaseDAO purchaseDAO = new PurchaseDAO();
         
         // Получаем все покупки пользователя
         List<Purchase> purchases = purchaseDAO.findByUserId(user.getIdUser());
+        System.out.println("🔍 DEBUG: Found " + purchases.size() + " total purchases for user");
         
         // Фильтруем покупки, где товар заказан и отзыв еще не оставлен
         List<Purchase> eligiblePurchases = purchases.stream()
                 .filter(purchase -> purchase.getPurchaseStage() >= 0 && purchase.getPurchaseStage() < 2)
                 .collect(java.util.stream.Collectors.toList());
         
+        System.out.println("🔍 DEBUG: Found " + eligiblePurchases.size() + " eligible purchases for review");
+        
         if (eligiblePurchases.isEmpty()) {
+            System.out.println("🔍 DEBUG: No eligible purchases, showing message");
             sent.sendMessage(user, "📝 Оставить отзыв\n\n" +
                     "❌ У вас нет товаров готовых для отзыва.\n\n" +
                     "Для оставления отзыва необходимо:\n" +
@@ -448,7 +508,9 @@ public class LogicUI {
         
         // Если есть только один товар, сразу переходим к вводу текста отзыва
         if (eligiblePurchases.size() == 1) {
+            System.out.println("🔍 DEBUG: Single eligible purchase found, creating session");
             Purchase purchase = eligiblePurchases.get(0);
+            System.out.println("🔍 DEBUG: Purchase ID: " + purchase.getIdPurchase() + ", Stage: " + purchase.getPurchaseStage());
             
             // Создаем клавиатуру с кнопкой "Назад"
             KeyboardRow backRow = new KeyboardRow();
@@ -463,16 +525,29 @@ public class LogicUI {
             sendMessage.setReplyMarkup(keyboardMarkup);
             
             // Отправляем сообщение о том, что пользователь оставляет отзыв на конкретный товар
-            String message = "📝 Вы оставляли заявку на товар: \"" + purchase.getProduct().getProductName() + "\"\n\n" +
+            String productName = (purchase.getProduct() != null && purchase.getProduct().getProductName() != null) 
+                ? purchase.getProduct().getProductName() 
+                : "Неизвестный товар";
+            String message = "📝 Вы оставляли заявку на товар: \"" + productName + "\"\n\n" +
                     "Пожалуйста, напишите текст вашего отзыва о товаре 🖊";
             
             sent.sendMessage(user, message, sendMessage);
+            System.out.println("🔍 DEBUG: Message sent to user");
             
             // Создаем сессию подачи отзыва и устанавливаем состояние
             ReviewSubmissionSession session = new ReviewSubmissionSession(purchase);
             session.setStep(ReviewSubmissionSession.Step.TEXT); // Устанавливаем шаг для ввода текста
             RedisSessionStore.setReviewSubmissionSession(user.getIdUser(), session);
             RedisSessionStore.setState(user.getIdUser(), "REVIEW_SUBMISSION_TEXT"); // Специальное состояние для одного товара
+            System.out.println("🔍 DEBUG: Session created and state set to REVIEW_SUBMISSION_TEXT");
+            
+            // Проверяем, что сессия действительно сохранилась
+            ReviewSubmissionSession checkSession = RedisSessionStore.getReviewSubmissionSession(user.getIdUser());
+            if (checkSession != null) {
+                System.out.println("🔍 DEBUG: Session verification successful, step = " + checkSession.getStep());
+            } else {
+                System.out.println("🔍 DEBUG: Session verification FAILED - session lost!");
+            }
             
             return;
         }
@@ -538,10 +613,12 @@ public class LogicUI {
      */
     private String getReviewStatusText(int purchaseStage) {
         switch (purchaseStage) {
+            case -1: return "Покупка отменена";
             case 0: return "Отзыв не оставлен";
-            case 1: return "Отзыв оставлен";
-            case 2: return "Отзыв утвержден";
+            case 1: return "Отзыв не оставлен";
+            case 2: return "Отправлен на модерацию";
             case 3: return "Отзыв утвержден";
+            case 4: return "Отзыв утвержден";
             default: return "Неизвестный статус";
         }
     }
@@ -551,10 +628,12 @@ public class LogicUI {
      */
     private String getScreenshotStatusText(int purchaseStage) {
         switch (purchaseStage) {
+            case -1: return "Покупка отменена";
             case 0: return "Не требуется";
-            case 1: return "Не отправлен";
-            case 2: return "Отправлен";
+            case 1: return "Не требуется";
+            case 2: return "Не отправлен";
             case 3: return "Отправлен";
+            case 4: return "Отправлен";
             default: return "Неизвестный статус";
         }
     }
@@ -564,10 +643,12 @@ public class LogicUI {
      */
     private String getPaymentStatusText(int purchaseStage) {
         switch (purchaseStage) {
+            case -1: return "Покупка отменена";
             case 0: return "Не требуется";
             case 1: return "Ожидание отзыва";
-            case 2: return "Ожидание выплаты";
-            case 3: return "Выплачено";
+            case 2: return "Ожидание запроса кешбека";
+            case 3: return "Ожидание выплаты";
+            case 4: return "Выплачено";
             default: return "Неизвестный статус";
         }
     }
@@ -589,6 +670,37 @@ public class LogicUI {
     }
     public void sentOneProduct(User user, Product selected, int messageId){
         Sent sent = new Sent();
+        
+        // Удаляем старое сообщение
+        TelegramBot telegramBot = new TelegramBot();
+        telegramBot.deleteMessage(user.getIdUser(), messageId);
+        
+        // Проверяем, есть ли ID сообщения в группе для пересылки
+        if (selected.getGroupMessageId() != null) {
+            try {
+                // Пересылаем сообщение из группы
+                ResourceBundle rb = ResourceBundle.getBundle("app");
+                long groupID = Long.parseLong(rb.getString("tg.group"));
+                
+                // Копируем сообщение из группы пользователю (без шапки "Переслано от")
+                sent.copyMessageFromGroup(user.getIdUser(), groupID, selected.getGroupMessageId().intValue());
+                
+                // Отправляем кнопки отдельно
+                sendProductButtons(user, selected, messageId);
+                
+                System.out.println("✅ Product message forwarded from group " + groupID + " message " + selected.getGroupMessageId() + " to user " + user.getIdUser());
+                return;
+                
+            } catch (Exception e) {
+                System.err.println("❌ Error forwarding product message: " + e.getMessage());
+                e.printStackTrace();
+                // Fallback к старому методу
+            }
+        }
+        
+        // Fallback: если нет ID сообщения в группе или произошла ошибка
+        System.out.println("⚠️ Using fallback method for product " + selected.getIdProduct() + " (no group message ID)");
+        
         String textProduct =
                 "Вы выбрали товар: "+ selected.getProductName() + " \n" +
                         "\n" +
@@ -597,7 +709,7 @@ public class LogicUI {
                         "\n" +
                         "Условия участия:\n" +
                         "- Подпишитесь на наш канал @adaptix_focus \uD83D\uDE09\n" +
-                        "- Включите запись экрана (мы её можем запросить)\n" +
+                        "- Сделайте скриншот поисковой строки (мы его можем запросить)\n" +
                         "- Найдите наш товар по запросу \""+ selected.getKeyQuery() +"\" \uD83D\uDD0E\n" +
                         "- Закажите товар и заполните заявку\n" +
                         "- Заберите товар с ПВЗ в течении 3 дней\uD83D\uDC4D\n" +
@@ -611,48 +723,6 @@ public class LogicUI {
                         "- Качественные фотографии в отзыве обязательны\uD83D\uDCF8\n" +
                         "- Отзыв нужно оставить не позднее 3 дней после забора товара с ПВЗ \uD83D\uDCC5\n" +
                         "- Желающие возвращать товар на ПВЗ не могут участвовать в акции \uD83D\uDEAB";
-        List<List<InlineKeyboardButton>> keyboard = new ArrayList<>();
-
-        InlineKeyboardButton back = new InlineKeyboardButton("⬅️ Назад");
-        back.setCallbackData("Exit_Product:" + messageId);
-        keyboard.add(List.of(back));
-
-        if(false){ // Каталог товаров всегда показывает пользовательский интерфейс
-            InlineKeyboardButton name = new InlineKeyboardButton("Наименование");
-            name.setCallbackData("update_tariffs_name_" + selected.getIdProduct());
-
-            InlineKeyboardButton description = new InlineKeyboardButton("Описание");
-            description.setCallbackData("update_tariffs_description_" + selected.getIdProduct());
-
-            InlineKeyboardButton price = new InlineKeyboardButton("Стоимость");
-            price.setCallbackData("update_tariffs_price_" + selected.getIdProduct());
-
-            InlineKeyboardButton term = new InlineKeyboardButton("Продолжительность");
-            term.setCallbackData("update_tariffs_term_" + selected.getIdProduct());
-
-            InlineKeyboardButton discount = new InlineKeyboardButton("Скидка");
-            discount.setCallbackData("update_tariffs_discount_" + selected.getIdProduct());
-
-            InlineKeyboardButton visible;
-            if(selected.isVisible()){
-                visible = new InlineKeyboardButton("Видим ✅");
-            }else{
-                visible = new InlineKeyboardButton("Невидим ️⚠️");
-            }
-            visible.setCallbackData("changeVisible_" + selected.getIdProduct());
-            keyboard.add(Arrays.asList(name,description,price,term,discount,visible));
-        } else {
-            // Каталог товаров всегда показывает пользовательский интерфейс
-            InlineKeyboardButton buy = new InlineKeyboardButton("✅ Купить");
-            buy.setCallbackData("buy_product:" + selected.getIdProduct());
-            keyboard.add(List.of(buy));
-        }
-
-        InlineKeyboardMarkup inlineMarkup = new InlineKeyboardMarkup();
-        inlineMarkup.setKeyboard(keyboard);
-
-        TelegramBot telegramBot = new TelegramBot();
-        telegramBot.deleteMessage(user.getIdUser(),messageId);
 
         // Проверяем существование файла фотографии
         File photoFile = new File(selected.getPhoto());
@@ -662,7 +732,7 @@ public class LogicUI {
             SendMessage textMessage = new SendMessage();
             textMessage.setChatId(String.valueOf(user.getIdUser()));
             textMessage.setText(textProduct);
-            textMessage.setReplyMarkup(inlineMarkup);
+            textMessage.setReplyMarkup(createProductKeyboard(selected, messageId, user));
             textMessage.setParseMode("HTML");
             
             sent.sendMessageWithMarkup(user, textMessage);
@@ -671,9 +741,116 @@ public class LogicUI {
 
         SendPhoto sendPhoto = new SendPhoto();
         sendPhoto.setChatId(String.valueOf(user.getIdUser()));
-        sendPhoto.setReplyMarkup(inlineMarkup);
+        sendPhoto.setReplyMarkup(createProductKeyboard(selected, messageId, user));
 
         sent.sendPhotoWithButton(user.getIdUser(), selected.getPhoto(), textProduct, sendPhoto);
+    }
+    
+    /**
+     * Создать клавиатуру для товара
+     */
+    private InlineKeyboardMarkup createProductKeyboard(Product selected, int messageId, User user) {
+        List<List<InlineKeyboardButton>> keyboard = new ArrayList<>();
+
+        // Кнопка "Назад"
+        InlineKeyboardButton back = new InlineKeyboardButton("⬅️ Назад");
+        back.setCallbackData("Exit_Product:" + messageId);
+        keyboard.add(List.of(back));
+
+        // Кнопка покупки
+        InlineKeyboardButton buy;
+        
+        // Проверяем доступность товара
+        if (!selected.hasAvailableSlots()) {
+            buy = new InlineKeyboardButton("❌ Закончился");
+            buy.setCallbackData("product_sold_out:" + selected.getIdProduct());
+        } else if (hasUserPurchasedProduct(user.getIdUser(), selected.getIdProduct())) {
+            // Показываем "забронирован вами" если пользователь уже покупал этот товар
+            buy = new InlineKeyboardButton("🔒 Забронирован вами");
+            buy.setCallbackData("product_reserved:" + selected.getIdProduct());
+        } else if (!user.isAdmin() && !canUserOrderNow(user)) {
+            // Ограничение частоты заказов: не чаще 1 раза в 14 дней
+            buy = new InlineKeyboardButton("⏳ Доступно через 14 дней");
+            buy.setCallbackData("order_rate_limited:" + selected.getIdProduct());
+        } else {
+            // Товар доступен для покупки
+            buy = new InlineKeyboardButton("✅ Купить");
+            buy.setCallbackData("buy_product:" + selected.getIdProduct());
+        }
+        
+        // Кнопки в отдельных строках для полной ширины
+        keyboard.add(List.of(buy));
+
+        InlineKeyboardMarkup inlineMarkup = new InlineKeyboardMarkup();
+        inlineMarkup.setKeyboard(keyboard);
+        return inlineMarkup;
+    }
+
+    private boolean canUserOrderNow(User user){
+        PurchaseDAO purchaseDAO = new PurchaseDAO();
+        List<Purchase> purchases = purchaseDAO.findByUserId(user.getIdUser());
+        java.time.LocalDate lastOrderDate = null;
+        for(Purchase p : purchases){
+            if(p.getDate()!=null){
+                if(lastOrderDate==null || p.getDate().isAfter(lastOrderDate)){
+                    lastOrderDate = p.getDate();
+                }
+            }
+        }
+        if(lastOrderDate==null) return true;
+        return !lastOrderDate.isAfter(java.time.LocalDate.now().minusDays(14));
+    }
+    
+    /**
+     * Отправить кнопки для товара отдельно
+     */
+    private void sendProductButtons(User user, Product selected, int messageId) {
+        Sent sent = new Sent();
+        SendMessage buttonMessage = new SendMessage();
+        buttonMessage.setChatId(String.valueOf(user.getIdUser()));
+        
+        // Создаем информативный текст с центрированием
+        String centeredText = "━━━━━━━━━━━━━━━━━━━━━";
+        buttonMessage.setText(centeredText);
+        buttonMessage.setReplyMarkup(createProductKeyboard(selected, messageId, user));
+        buttonMessage.setParseMode("HTML");
+        
+        sent.sendMessageWithMarkup(user, buttonMessage);
+    }
+    
+    /**
+     * Центрировать текст по указанной ширине
+     */
+    private String centerText(String text, int width) {
+        if (text == null || text.trim().isEmpty()) {
+            return text;
+        }
+        
+        String trimmedText = text.trim();
+        int textLength = trimmedText.length();
+        
+        if (textLength >= width) {
+            return trimmedText;
+        }
+        
+        int padding = (width - textLength) / 2;
+        StringBuilder centered = new StringBuilder();
+        
+        // Добавляем пробелы слева
+        for (int i = 0; i < padding; i++) {
+            centered.append(" ");
+        }
+        
+        // Добавляем текст
+        centered.append(trimmedText);
+        
+        // Добавляем пробелы справа для выравнивания
+        int remainingPadding = width - centered.length();
+        for (int i = 0; i < remainingPadding; i++) {
+            centered.append(" ");
+        }
+        
+        return centered.toString();
     }
 
     public void sentBack(User user, String text, String buttonText){
@@ -752,6 +929,11 @@ public class LogicUI {
         userManagementButton.setText("👥 Админы");
         userManagementButton.setCallbackData("admin_user_management");
         
+        // Кнопка "Заблокировать пользователя"
+        InlineKeyboardButton blockUserButton = new InlineKeyboardButton();
+        blockUserButton.setText("🚫 Заблокировать пользователя");
+        blockUserButton.setCallbackData("admin_block_user");
+        
         // Кнопка "Настройки"
         InlineKeyboardButton settingsButton = new InlineKeyboardButton();
         settingsButton.setText("⚙️ Настройки");
@@ -766,6 +948,7 @@ public class LogicUI {
         rows.add(List.of(addProductButton));
         rows.add(List.of(statsButton));
         rows.add(List.of(userManagementButton));
+        rows.add(List.of(blockUserButton));
         rows.add(List.of(settingsButton));
         rows.add(List.of(backToMenuButton));
         
@@ -808,6 +991,11 @@ public class LogicUI {
         userManagementButton.setText("👥 Админы");
         userManagementButton.setCallbackData("admin_user_management");
         
+        // Кнопка "Заблокировать пользователя"
+        InlineKeyboardButton blockUserButton = new InlineKeyboardButton();
+        blockUserButton.setText("🚫 Заблокировать пользователя");
+        blockUserButton.setCallbackData("admin_block_user");
+        
         // Кнопка "Настройки"
         InlineKeyboardButton settingsButton = new InlineKeyboardButton();
         settingsButton.setText("⚙️ Настройки");
@@ -822,6 +1010,7 @@ public class LogicUI {
         rows.add(List.of(addProductButton));
         rows.add(List.of(statsButton));
         rows.add(List.of(userManagementButton));
+        rows.add(List.of(blockUserButton));
         rows.add(List.of(settingsButton));
         rows.add(List.of(backToMenuButton));
         
@@ -840,11 +1029,138 @@ public class LogicUI {
     }
     
     /**
+     * Показать интерфейс для блокировки пользователя
+     */
+    public void showBlockUserInterface(User admin) {
+        Sent sent = new Sent();
+        sent.sendMessage(admin, "🚫 <b>Блокировка пользователя</b>\n\n" +
+                "Введите username пользователя для блокировки (без @):\n\n" +
+                "Пример: <code>username123</code>\n\n" +
+                "⚠️ <b>Внимание:</b> При блокировке пользователя будут автоматически сняты все его брони товаров.");
+    }
+    
+    /**
+     * Заблокировать пользователя с снятием всех броней
+     */
+    public void blockUser(User admin, String username) {
+        try {
+            UserDAO userDAO = new UserDAO();
+            User targetUser = userDAO.findByUsername(username);
+            
+            if (targetUser == null) {
+                Sent sent = new Sent();
+                sent.sendMessage(admin, "❌ Пользователь с username <code>" + username + "</code> не найден.");
+                return;
+            }
+            
+            if (targetUser.isAdmin()) {
+                Sent sent = new Sent();
+                sent.sendMessage(admin, "❌ Нельзя заблокировать администратора!");
+                return;
+            }
+            
+            // Если пользователь уже заблокирован — разблокируем (тоггл)
+            if (targetUser.isBlock()) {
+                targetUser.setBlock(false);
+                userDAO.update(targetUser);
+
+                Sent sent = new Sent();
+                try {
+                    sent.sendMessage(targetUser, "✅ <b>Вы были разблокированы</b>\n\nПовторно проверьте доступ к функциям бота.");
+                } catch (Exception e) {
+                    System.err.println("❌ Failed to notify unblocked user: " + e.getMessage());
+                }
+
+                sent.sendMessage(admin, "✅ <b>Пользователь разблокирован</b>\n\n" +
+                        "👤 Пользователь: <code>" + username + "</code>\n" +
+                        "🆔 ID: <code>" + targetUser.getIdUser() + "</code>");
+
+                // Возврат в админ-меню
+                showAdminMenu(admin);
+                return;
+            }
+            
+            // Снимаем все брони пользователя
+            int cancelledReservations = cancelAllUserReservations(targetUser);
+            
+            // Блокируем пользователя
+            targetUser.setBlock(true);
+            userDAO.update(targetUser);
+            
+            // Отправляем уведомление пользователю
+            Sent sent = new Sent();
+            try {
+                sent.sendMessage(targetUser, "🚫 <b>Вы были заблокированы администратором</b>\n\n" +
+                        "Ваш доступ к боту ограничен. Обратитесь к администратору для разблокировки.");
+            } catch (Exception e) {
+                System.err.println("❌ Failed to notify blocked user: " + e.getMessage());
+            }
+            
+            // Отправляем подтверждение администратору
+            sent.sendMessage(admin, "✅ <b>Пользователь заблокирован</b>\n\n" +
+                    "👤 Пользователь: <code>" + username + "</code>\n" +
+                    "🆔 ID: <code>" + targetUser.getIdUser() + "</code>\n" +
+                    "📦 Отменено броней: <code>" + cancelledReservations + "</code>\n\n" +
+                    "Пользователь получил уведомление о блокировке.");
+            
+            System.out.println("🚫 User " + username + " (ID: " + targetUser.getIdUser() + ") blocked by admin " + admin.getUsername());
+            
+            // Возвращаемся в админ-меню
+            showAdminMenu(admin);
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error blocking user: " + e.getMessage());
+            e.printStackTrace();
+            
+            Sent sent = new Sent();
+            sent.sendMessage(admin, "❌ Ошибка при блокировке пользователя: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Снять все брони пользователя
+     */
+    private int cancelAllUserReservations(User user) {
+        int cancelledCount = 0;
+        
+        try {
+            // Получаем все товары
+            ProductDAO productDAO = new ProductDAO();
+            List<Product> allProducts = productDAO.findAll();
+            
+            ReservationService reservationService = ReservationService.getInstance();
+            
+            // Проверяем каждый товар на наличие брони от пользователя
+            for (Product product : allProducts) {
+                if (reservationService.isReservedByUser(user, product)) {
+                    boolean cancelled = reservationService.cancelReservation(user, product);
+                    if (cancelled) {
+                        cancelledCount++;
+                        System.out.println("🚫 Cancelled reservation for user " + user.getIdUser() + 
+                                ", product " + product.getIdProduct());
+                    }
+                }
+            }
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error cancelling user reservations: " + e.getMessage());
+            e.printStackTrace();
+        }
+        
+        return cancelledCount;
+    }
+    
+    /**
      * Показать список товаров с кнопками редактирования
      */
     public void showProductsListWithEditButtons(User admin) {
+        long startTime = System.currentTimeMillis();
+        
         ProductDAO productDAO = new ProductDAO();
+        long productsLoadStart = System.currentTimeMillis();
         List<Product> products = productDAO.findAll();
+        long productsLoadEnd = System.currentTimeMillis();
+        System.out.println("⏱️ Products loaded in " + (productsLoadEnd - productsLoadStart) + " ms");
         
         System.out.println("🔍 Found " + products.size() + " products in database");
         
@@ -901,6 +1217,9 @@ public class LogicUI {
         
         Sent sent = new Sent();
         sent.sendMessage(admin, "📦 Выберите товар для просмотра покупок или редактирования:", message);
+        
+        long endTime = System.currentTimeMillis();
+        System.out.println("⏱️ showProductsListWithEditButtons completed in " + (endTime - startTime) + " ms");
     }
     
     /**
@@ -1006,11 +1325,20 @@ public class LogicUI {
      * Показать список пользователей, купивших товар
      */
     public void showProductPurchases(User admin, int productId) {
+        System.out.println("🔍 showProductPurchases: Starting for product ID " + productId);
+        
+        long startTime = System.currentTimeMillis();
+        
         ProductDAO productDAO = new ProductDAO();
         PurchaseDAO purchaseDAO = new PurchaseDAO();
         
+        long productLoadStart = System.currentTimeMillis();
         Product product = productDAO.findById(productId);
+        long productLoadEnd = System.currentTimeMillis();
+        System.out.println("⏱️ Product loaded in " + (productLoadEnd - productLoadStart) + " ms");
+        
         if (product == null) {
+            System.out.println("❌ Product not found for ID: " + productId);
             // Показываем сообщение с кнопкой "Назад" если товар не найден
             InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
             List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
@@ -1031,7 +1359,12 @@ public class LogicUI {
             return;
         }
         
+        long purchasesLoadStart = System.currentTimeMillis();
+        System.out.println("🔍 Loading purchases for product ID " + productId);
         List<Purchase> purchases = purchaseDAO.findByProductId(productId);
+        long purchasesLoadEnd = System.currentTimeMillis();
+        System.out.println("⏱️ Purchases loaded in " + (purchasesLoadEnd - purchasesLoadStart) + " ms");
+        System.out.println("🔍 Found " + purchases.size() + " purchases for product ID " + productId);
         
         if (purchases.isEmpty()) {
             // Показываем сообщение с кнопкой "Назад" даже если покупок нет
@@ -1054,15 +1387,27 @@ public class LogicUI {
             return;
         }
         
+        System.out.println("🔍 Creating buttons for " + purchases.size() + " purchases");
         InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
         List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
         
         for (Purchase purchase : purchases) {
-            InlineKeyboardButton button = new InlineKeyboardButton();
-            button.setText(purchase.getUser().getUsername() + " - " + getPurchaseStageText(purchase.getPurchaseStage()));
-            button.setCallbackData("admin_user_" + purchase.getIdPurchase());
-            
-            rows.add(List.of(button));
+            try {
+                String username = purchase.getUser() != null ? purchase.getUser().getUsername() : "Unknown";
+                String stageText = getPurchaseStageText(purchase.getPurchaseStage());
+                String buttonText = username + " - " + stageText;
+                
+                System.out.println("🔍 Creating button for purchase " + purchase.getIdPurchase() + ": " + buttonText);
+                
+                InlineKeyboardButton button = new InlineKeyboardButton();
+                button.setText(buttonText);
+                button.setCallbackData("admin_user_" + purchase.getIdPurchase());
+                
+                rows.add(List.of(button));
+            } catch (Exception e) {
+                System.err.println("❌ Error creating button for purchase " + purchase.getIdPurchase() + ": " + e.getMessage());
+                e.printStackTrace();
+            }
         }
         
         // Кнопка "Назад"
@@ -1079,6 +1424,9 @@ public class LogicUI {
         
         Sent sent = new Sent();
         sent.sendMessage(admin, "🛒 Покупатели товара \"" + product.getProductName() + "\":", message);
+        
+        long endTime = System.currentTimeMillis();
+        System.out.println("⏱️ showProductPurchases completed in " + (endTime - startTime) + " ms");
     }
 
     /**
@@ -1145,16 +1493,19 @@ public class LogicUI {
                 ResourceBundle rb = ResourceBundle.getBundle("app");
                 String groupIdStr = rb.getString("tg.group");
                 
-                // Убираем префикс "-100" если он есть
-                String cleanGroupId = groupIdStr;
+                // Для групп с подгруппами (topics) ссылка формируется по-другому
+                // Нужно использовать полный ID группы с префиксом
+                String orderUrl;
                 if (groupIdStr.startsWith("-100")) {
-                    cleanGroupId = groupIdStr.substring(4);
-                } else if (groupIdStr.startsWith("100")) {
-                    cleanGroupId = groupIdStr.substring(3);
+                    // Для супергрупп с подгруппами
+                    orderUrl = "https://t.me/c/" + groupIdStr.substring(4) + "/" + purchase.getOrderMessageId();
+                } else if (groupIdStr.startsWith("-")) {
+                    // Для обычных групп
+                    orderUrl = "https://t.me/c/" + groupIdStr.substring(1) + "/" + purchase.getOrderMessageId();
+                } else {
+                    // Fallback
+                    orderUrl = "https://t.me/c/" + groupIdStr + "/" + purchase.getOrderMessageId();
                 }
-                
-                // Формируем ссылку на сообщение в подгруппе пользователя
-                String orderUrl = "https://t.me/c/" + cleanGroupId + "/" + purchase.getOrderMessageId();
                 
                 InlineKeyboardButton orderButton = new InlineKeyboardButton();
                 orderButton.setText("1️⃣ Товар заказан ✅");
@@ -1162,6 +1513,7 @@ public class LogicUI {
                 rows.add(List.of(orderButton));
                 
                 System.out.println("🔗 Created order link: " + orderUrl + " for purchase ID: " + purchase.getIdPurchase());
+                System.out.println("🔗 Group ID: " + groupIdStr + ", Message ID: " + purchase.getOrderMessageId());
             } catch (Exception e) {
                 System.err.println("Ошибка при создании ссылки на заказ: " + e.getMessage());
                 e.printStackTrace();
@@ -1240,6 +1592,14 @@ public class LogicUI {
                 cashbackButton.setCallbackData("no_message_available");
                 rows.add(List.of(cashbackButton));
             }
+        }
+        
+        // Кнопка отмены покупки (только если покупка не завершена полностью)
+        if (purchase.getPurchaseStage() < 4) {
+            InlineKeyboardButton cancelButton = new InlineKeyboardButton();
+            cancelButton.setText("❌ Отменить покупку");
+            cancelButton.setCallbackData("admin_cancel_purchase_" + purchase.getIdPurchase());
+            rows.add(List.of(cancelButton));
         }
         
         // Кнопка "Назад"
@@ -1402,11 +1762,13 @@ public class LogicUI {
      */
     private String getPurchaseStageText(int stage) {
         return switch (stage) {
+            case -1: yield "❌ Отменена";
             case 0: yield "🛒 Заказан";
-            case 1: yield "📦 В пути";
-            case 2: yield "🏠 Доставлен";
-            case 3: yield "🏠 Доставлена";
-            default: yield "❓ Неизвестно";
+            case 1: yield "📦 Получен";
+            case 2: yield "⭐ Отзыв оставлен";
+            case 3: yield "💸 Кешбек запрошен";
+            case 4: yield "✅ Кешбек выплачен";
+            default: yield "❓ Неизвестно (" + stage + ")";
         };
     }
 
@@ -1488,8 +1850,13 @@ public class LogicUI {
      * Показать меню редактирования товара
      */
     public void showEditProductMenu(User admin, int productId) {
+        long startTime = System.currentTimeMillis();
+        
         ProductDAO productDAO = new ProductDAO();
+        long productLoadStart = System.currentTimeMillis();
         Product product = productDAO.findById(productId);
+        long productLoadEnd = System.currentTimeMillis();
+        System.out.println("⏱️ Product loaded in " + (productLoadEnd - productLoadStart) + " ms");
         
         if (product == null) {
             Sent sent = new Sent();
@@ -1560,5 +1927,49 @@ public class LogicUI {
         
         Sent sent = new Sent();
         sent.sendMessage(admin, text, message);
+        
+        long endTime = System.currentTimeMillis();
+        System.out.println("⏱️ showEditProductMenu completed in " + (endTime - startTime) + " ms");
+    }
+    
+    /**
+     * Проверить, покупал ли пользователь этот товар ранее или забронировал его
+     */
+    private boolean hasUserPurchasedProduct(Long userId, int productId) {
+        try {
+            System.out.println("🔍 Checking purchases and reservations for user " + userId + " and product " + productId);
+            
+            // Проверяем бронирование
+            ReservationService reservationService = ReservationService.getInstance();
+            User user = new User();
+            user.setIdUser(userId);
+            Product product = new Product();
+            product.setIdProduct(productId);
+            
+            if (reservationService.isReservedByUser(user, product)) {
+                System.out.println("🔍 User " + userId + " has reserved product " + productId);
+                return true;
+            }
+            
+            // Проверяем покупки
+            PurchaseDAO purchaseDAO = new PurchaseDAO();
+            List<Purchase> userPurchases = purchaseDAO.findByUserId(userId);
+            System.out.println("🔍 Found " + userPurchases.size() + " purchases for user " + userId);
+            
+            for (Purchase purchase : userPurchases) {
+                if (purchase.getProduct() != null && purchase.getProduct().getIdProduct() == productId) {
+                    System.out.println("🔍 User " + userId + " has purchased product " + productId);
+                    return true;
+                } else if (purchase.getProduct() == null) {
+                    System.out.println("⚠️ Purchase " + purchase.getIdPurchase() + " has null product, skipping");
+                }
+            }
+            System.out.println("🔍 User " + userId + " has NOT purchased or reserved product " + productId);
+            return false;
+        } catch (Exception e) {
+            System.err.println("❌ Error in hasUserPurchasedProduct: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }
     }
 }

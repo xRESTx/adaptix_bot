@@ -7,8 +7,11 @@ public class ReviewRequestSession {
     private Step step = Step.SEARCH_SCREENSHOT;
     private Product product;
     private Long groupMessageId;
-    private String searchScreenshotPath;  // Путь к скриншоту поиска
-    private String deliveryScreenshotPath; // Путь к скриншоту доставки
+    private Integer searchScreenshotMessageId; // ID сообщения со скриншотом поиска
+    private Integer deliveryScreenshotMessageId; // ID сообщения со скриншотом доставки
+    private String searchScreenshotFileId; // Telegram file_id скриншота поиска
+    private String deliveryScreenshotFileId; // Telegram file_id скриншота доставки
+    private Integer purchaseId; // ID созданной покупки
 
     public enum Step {
         SEARCH_SCREENSHOT,    // 1. скриншот поиска и товара
@@ -53,20 +56,44 @@ public class ReviewRequestSession {
     public void setGroupMessageId(Long groupMessageId) {
         this.groupMessageId = groupMessageId;
     }
-
-    public String getSearchScreenshotPath() {
-        return searchScreenshotPath;
+    
+    public Integer getPurchaseId() {
+        return purchaseId;
     }
-
-    public void setSearchScreenshotPath(String searchScreenshotPath) {
-        this.searchScreenshotPath = searchScreenshotPath;
+    
+    public void setPurchaseId(Integer purchaseId) {
+        this.purchaseId = purchaseId;
     }
-
-    public String getDeliveryScreenshotPath() {
-        return deliveryScreenshotPath;
+    
+    public Integer getSearchScreenshotMessageId() {
+        return searchScreenshotMessageId;
     }
-
-    public void setDeliveryScreenshotPath(String deliveryScreenshotPath) {
-        this.deliveryScreenshotPath = deliveryScreenshotPath;
+    
+    public void setSearchScreenshotMessageId(Integer searchScreenshotMessageId) {
+        this.searchScreenshotMessageId = searchScreenshotMessageId;
+    }
+    
+    public Integer getDeliveryScreenshotMessageId() {
+        return deliveryScreenshotMessageId;
+    }
+    
+    public void setDeliveryScreenshotMessageId(Integer deliveryScreenshotMessageId) {
+        this.deliveryScreenshotMessageId = deliveryScreenshotMessageId;
+    }
+    
+    public String getSearchScreenshotFileId() {
+        return searchScreenshotFileId;
+    }
+    
+    public void setSearchScreenshotFileId(String searchScreenshotFileId) {
+        this.searchScreenshotFileId = searchScreenshotFileId;
+    }
+    
+    public String getDeliveryScreenshotFileId() {
+        return deliveryScreenshotFileId;
+    }
+    
+    public void setDeliveryScreenshotFileId(String deliveryScreenshotFileId) {
+        this.deliveryScreenshotFileId = deliveryScreenshotFileId;
     }
 }

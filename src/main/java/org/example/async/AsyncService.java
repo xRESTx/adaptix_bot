@@ -3,6 +3,7 @@ package org.example.async;
 import org.example.dao.PhotoDAO;
 import org.example.dao.PurchaseDAO;
 import org.example.session.ReviewRequestSession;
+import org.example.session.ReservationManager;
 import org.example.table.Photo;
 import org.example.table.Purchase;
 import org.example.table.User;
@@ -88,9 +89,18 @@ public class AsyncService {
                 purchase.setDate(LocalDate.now());
                 purchase.setPurchaseStage(0);
                 purchase.setGroupMessageId(groupMessageId);
+                // Сохраняем сумму покупки, если указана в сессии
+                try {
+                    if (session.getRequest() != null && session.getRequest().getPurchaseAmount() != null) {
+                        purchase.setPurchaseAmount(Integer.parseInt(session.getRequest().getPurchaseAmount()));
+                    }
+                } catch (NumberFormatException ignore) {}
                 
                 PurchaseDAO purchaseDAO = new PurchaseDAO();
                 purchaseDAO.save(purchase);
+                
+                // Увеличиваем количество участников товара
+                ReservationManager.incrementProductParticipants(session.getProduct().getIdProduct());
                 
                 // Создаем запись о фото
                 Photo photoEntity = new Photo();
@@ -281,27 +291,20 @@ public class AsyncService {
             try {
                 System.out.println("🔄 Async search screenshot processing for user: " + user.getIdUser());
 
-                TelegramBot telegramBot = new TelegramBot();
-
-                // Создаем директорию для скриншотов
+                // Создаем директорию для скриншотов (на всякий случай)
                 File reviewsDir = new File("reviews/");
                 if (!reviewsDir.exists()) {
                     reviewsDir.mkdirs();
                 }
 
-                // Генерируем уникальное имя файла
-                String fileName = "search_" + new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss").format(new Date()) + ".jpg";
-                Path filePath = Paths.get("reviews/", fileName);
+                // НЕ скачиваем файл, так как используем копирование сообщений
+                // telegramBot.downloadFile(fileId, filePath.toString());
 
-                // Загружаем файл
-                telegramBot.downloadFile(fileId, filePath.toString());
+                // Путь к скриншоту больше не сохраняем, так как используем копирование сообщений
 
-                // Сохраняем путь к скриншоту поиска
-                session.setSearchScreenshotPath(filePath.toString());
+                System.out.println("✅ Search screenshot processed successfully (no download)");
 
-                System.out.println("✅ Search screenshot processed successfully: " + fileName);
-
-            } catch (TelegramApiException | IOException e) {
+            } catch (Exception e) {
                 System.err.println("❌ Search screenshot processing error: " + e.getMessage());
                 e.printStackTrace();
             }
@@ -321,57 +324,58 @@ public class AsyncService {
             try {
                 System.out.println("🔄 Async delivery screenshot processing for user: " + user.getIdUser());
 
-                TelegramBot telegramBot = new TelegramBot();
-
-                // Создаем директорию для скриншотов
+                // Создаем директорию для скриншотов (на всякий случай)
                 File reviewsDir = new File("reviews/");
                 if (!reviewsDir.exists()) {
                     reviewsDir.mkdirs();
                 }
 
-                // Генерируем уникальное имя файла
-                String fileName = "delivery_" + new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss").format(new Date()) + ".jpg";
-                Path filePath = Paths.get("reviews/", fileName);
+                // НЕ скачиваем файл, так как используем копирование сообщений
+                // telegramBot.downloadFile(fileId, filePath.toString());
 
-                // Загружаем файл
-                telegramBot.downloadFile(fileId, filePath.toString());
-
-                // Сохраняем путь к скриншоту доставки
-                session.setDeliveryScreenshotPath(filePath.toString());
-
-                // Создаем запись о покупке
+                // Создаем запись о покупке (без orderMessageId, он будет установлен позже)
                 Purchase purchase = new Purchase();
                 purchase.setProduct(session.getProduct());
                 purchase.setUser(user);
                 purchase.setDate(LocalDate.now());
                 purchase.setOrderTime(java.time.LocalTime.now());
                 purchase.setPurchaseStage(0);
-                purchase.setGroupMessageId(session.getGroupMessageId());
-                purchase.setOrderMessageId(session.getGroupMessageId()); // Устанавливаем orderMessageId
+                // orderMessageId будет установлен в MessageProcessing после отправки сообщения
+                // Сохраняем сумму покупки, если указана в сессии
+                try {
+                    if (session.getRequest() != null && session.getRequest().getPurchaseAmount() != null) {
+                        purchase.setPurchaseAmount(Integer.parseInt(session.getRequest().getPurchaseAmount()));
+                    }
+                } catch (NumberFormatException ignore) {}
 
                 PurchaseDAO purchaseDAO = new PurchaseDAO();
                 purchaseDAO.save(purchase);
+                
+                // Сохраняем ID покупки в сессии для последующего обновления
+                session.setPurchaseId(purchase.getIdPurchase());
 
-                // Создаем запись о фото поиска
+                // Количество участников уже увеличено при бронировании товара
+
+                // Создаем запись о фото поиска (используем ID сообщения вместо пути к файлу)
                 Photo searchPhoto = new Photo();
                 searchPhoto.setPurchase(purchase);
                 searchPhoto.setUser(user);
-                searchPhoto.setIdPhoto("search_" + fileName);
+                searchPhoto.setIdPhoto("search_msg_" + session.getSearchScreenshotMessageId());
 
                 PhotoDAO photoDAO = new PhotoDAO();
                 photoDAO.save(searchPhoto);
 
-                // Создаем запись о фото доставки
+                // Создаем запись о фото доставки (используем ID сообщения вместо пути к файлу)
                 Photo deliveryPhoto = new Photo();
                 deliveryPhoto.setPurchase(purchase);
                 deliveryPhoto.setUser(user);
-                deliveryPhoto.setIdPhoto("delivery_" + fileName);
+                deliveryPhoto.setIdPhoto("delivery_msg_" + session.getDeliveryScreenshotMessageId());
 
                 photoDAO.save(deliveryPhoto);
 
-                System.out.println("✅ Delivery screenshot processed successfully: " + fileName);
+                System.out.println("✅ Delivery screenshot processed successfully (using message IDs)");
 
-            } catch (TelegramApiException | IOException e) {
+            } catch (Exception e) {
                 System.err.println("❌ Delivery screenshot processing error: " + e.getMessage());
                 e.printStackTrace();
             }
@@ -472,7 +476,7 @@ public class AsyncService {
     }
     
     /**
-     * Асинхронная обработка скриншота отзыва для получения кешбека
+     * Асинхронная обработка скриншота отзыва для получения кешбека (без скачивания)
      */
     public static CompletableFuture<String> processCashbackScreenshotAsync(
             Purchase purchase,
@@ -484,35 +488,23 @@ public class AsyncService {
             try {
                 System.out.println("🔄 Async cashback screenshot processing for user: " + user.getIdUser());
 
-                TelegramBot telegramBot = new TelegramBot();
+                // НЕ скачиваем файл, так как используем пересылку сообщений
+                // telegramBot.downloadFile(fileId, filePath.toString());
 
-                // Создаем директорию для скриншотов кешбека
-                File reviewsDir = new File("reviews/");
-                if (!reviewsDir.exists()) {
-                    reviewsDir.mkdirs();
-                }
-
-                // Генерируем уникальное имя файла
-                String fileName = "cashback_" + purchase.getIdPurchase() + "_" + 
-                    new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss").format(new Date()) + ".jpg";
-                Path filePath = Paths.get("reviews/", fileName);
-
-                // Загружаем файл
-                telegramBot.downloadFile(fileId, filePath.toString());
-
-                // Создаем запись о фото кешбека
+                // Создаем запись о фото кешбека (используем ID сообщения вместо пути к файлу)
                 Photo cashbackPhoto = new Photo();
                 cashbackPhoto.setPurchase(purchase);
                 cashbackPhoto.setUser(user);
-                cashbackPhoto.setIdPhoto(fileName);
+                // Используем фиктивное имя файла, так как файл не скачивается
+                cashbackPhoto.setIdPhoto("cashback_msg_" + System.currentTimeMillis());
 
                 PhotoDAO photoDAO = new PhotoDAO();
                 photoDAO.save(cashbackPhoto);
 
-                System.out.println("✅ Cashback screenshot processed successfully: " + fileName);
-                return filePath.toString();
+                System.out.println("✅ Cashback screenshot processed successfully (no download)");
+                return "processed"; // Возвращаем фиктивный путь
 
-            } catch (TelegramApiException | IOException e) {
+            } catch (Exception e) {
                 System.err.println("❌ Cashback screenshot processing error: " + e.getMessage());
                 e.printStackTrace();
                 return null;

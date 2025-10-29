@@ -6,6 +6,13 @@ public class ProductCreationSession {
     private Product product = new Product();
     private Step step = Step.ARTICUL;
 
+    public ProductCreationSession() {
+        // Устанавливаем товар как видимый по умолчанию
+        product.setVisible(false);
+        // Устанавливаем начальное количество участников в 0
+        product.setNumberOfParticipants(0);
+    }
+
     public enum Step {
         ARTICUL,
         PRODUCT_NAME,

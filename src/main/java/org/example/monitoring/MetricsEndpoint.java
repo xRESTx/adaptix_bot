@@ -2,6 +2,7 @@ package org.example.monitoring;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.HttpHandler;
@@ -21,16 +22,40 @@ import com.sun.net.httpserver.HttpExchange;
  */
 public class MetricsEndpoint {
     
-    private static final int METRICS_PORT = 8080;
+    private static final int START_PORT = 8080; // Начальный порт для поиска
+    private static final int MAX_PORT = 8090;   // Максимальный порт для поиска
     private static HttpServer server;
+    private static int actualPort = -1; // Фактически используемый порт
     private static final MetricsService metricsService = MetricsService.getInstance();
+    
+    /**
+     * Найти свободный порт в диапазоне
+     */
+    private static int findFreePort() {
+        for (int port = START_PORT; port <= MAX_PORT; port++) {
+            try (ServerSocket socket = new ServerSocket(port)) {
+                return port; // Порт свободен
+            } catch (IOException e) {
+                // Порт занят, пробуем следующий
+                continue;
+            }
+        }
+        return -1; // Не найден свободный порт
+    }
     
     /**
      * Запуск HTTP сервера для метрик
      */
     public static void start() {
         try {
-            server = HttpServer.create(new InetSocketAddress(METRICS_PORT), 0);
+            // Находим свободный порт
+            actualPort = findFreePort();
+            if (actualPort == -1) {
+                System.err.println("❌ No free ports available in range " + START_PORT + "-" + MAX_PORT);
+                return;
+            }
+            
+            server = HttpServer.create(new InetSocketAddress(actualPort), 0);
             
             // Endpoint для Prometheus метрик
             server.createContext("/metrics", new PrometheusHandler());
@@ -47,15 +72,22 @@ public class MetricsEndpoint {
             server.setExecutor(null);
             server.start();
             
-            System.out.println("🚀 HTTP metrics server started on port " + METRICS_PORT);
-            System.out.println("📊 Prometheus metrics: http://localhost:" + METRICS_PORT + "/metrics");
-            System.out.println("❤️ Health check: http://localhost:" + METRICS_PORT + "/health");
-            System.out.println("📈 JSON metrics: http://localhost:" + METRICS_PORT + "/api/metrics");
-            System.out.println("📊 Statistics: http://localhost:" + METRICS_PORT + "/api/stats");
+            System.out.println("🚀 HTTP metrics server started on port " + actualPort);
+            System.out.println("📊 Prometheus metrics: http://localhost:" + actualPort + "/metrics");
+            System.out.println("❤️ Health check: http://localhost:" + actualPort + "/health");
+            System.out.println("📈 JSON metrics: http://localhost:" + actualPort + "/api/metrics");
+            System.out.println("📊 Statistics: http://localhost:" + actualPort + "/api/stats");
             
         } catch (IOException e) {
             System.err.println("❌ HTTP metrics server startup error: " + e.getMessage());
         }
+    }
+    
+    /**
+     * Получить фактически используемый порт
+     */
+    public static int getActualPort() {
+        return actualPort;
     }
     
     /**

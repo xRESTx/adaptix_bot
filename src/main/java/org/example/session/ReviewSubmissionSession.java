@@ -7,14 +7,15 @@ public class ReviewSubmissionSession {
     private Step step = Step.INSTRUCTIONS;
     private int photosReceived = 0;
     private boolean videoReceived = false;
-    private String[] photoFileIds = new String[4];
+    private String[] photoFileIds = new String[3];
     private String videoFileId;
     private String reviewText;
     
     // Для пересылки сообщений
-    private Integer[] photoMessageIds = new Integer[4];
+    private Integer[] photoMessageIds = new Integer[3];
     private Integer videoMessageId;
     private Long userChatId;
+    private boolean isCompleted = false; // Флаг завершения процесса
     
     public enum Step {
         INSTRUCTIONS,    // Показ инструкции
@@ -52,14 +53,14 @@ public class ReviewSubmissionSession {
     }
     
     public void addPhoto(String photoFileId) {
-        if (photosReceived < 4) {
+        if (photosReceived < 3) {
             photoFileIds[photosReceived] = photoFileId;
             photosReceived++;
         }
     }
     
     public void addPhotoWithMessageId(String photoFileId, Integer messageId) {
-        if (photosReceived < 4) {
+        if (photosReceived < 3) {
             photoFileIds[photosReceived] = photoFileId;
             photoMessageIds[photosReceived] = messageId;
             photosReceived++;
@@ -122,7 +123,15 @@ public class ReviewSubmissionSession {
         this.userChatId = userChatId;
     }
     
+    public boolean isCompleted() {
+        return isCompleted;
+    }
+    
+    public void setCompleted(boolean completed) {
+        this.isCompleted = completed;
+    }
+    
     public boolean isComplete() {
-        return photosReceived == 4 && videoReceived;
+        return photosReceived == 3 && videoReceived;
     }
 }

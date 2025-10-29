@@ -7,14 +7,18 @@ import org.example.dao.UserDAO;
 import org.example.monitoring.MetricsService;
 import io.micrometer.core.instrument.Timer;
 import org.example.session.ProductCreationSession;
+import org.example.session.PurchaseCancellationSession;
 import org.example.session.ReviewRequestSession;
 import org.example.session.ReviewSubmissionSession;
 import org.example.session.ReviewRejectionSession;
+import org.example.session.CashbackSession;
 import org.example.session.RedisSessionStore;
+import org.example.session.ReservationService;
 import org.example.session.ReservationManager;
 import org.example.settings.AdminSettings;
 import java.util.ResourceBundle;
 import java.util.List;
+import java.util.ArrayList;
 import org.example.table.Product;
 import org.example.table.Purchase;
 import org.example.table.User;
@@ -175,6 +179,29 @@ public class MessageProcessing {
             metricsService.recordUserMessage();
             
         if (String.valueOf(chatId).startsWith("-100")) {
+            System.out.println("🔍 DEBUG: Message from group " + chatId);
+            // Проверяем, не является ли это сообщением с причиной отклонения отзыва
+            Integer threadID = update.getMessage().getMessageThreadId();
+            System.out.println("🔍 DEBUG: Thread ID = " + threadID);
+            if (threadID != null) {
+                UserDAO userDAO = new UserDAO();
+                User userInThread = userDAO.findByIdMessage(threadID);
+                System.out.println("🔍 DEBUG: User in thread = " + (userInThread != null ? userInThread.getUsername() : "null"));
+                if (userInThread != null) {
+                    // Проверяем, есть ли активная сессия отклонения для этого пользователя
+                    // Ищем сессию по ID подгруппы (threadID), а не по ID пользователя
+                    System.out.println("🔍 DEBUG: Searching for rejection session with threadID = " + threadID);
+                    ReviewRejectionSession rejectionSession = RedisSessionStore.getReviewRejectionSession((long) threadID);
+                    System.out.println("🔍 DEBUG: Rejection session = " + (rejectionSession != null ? "found" : "null"));
+                    if (rejectionSession != null) {
+                        System.out.println("🔍 DEBUG: Processing rejection reason from group");
+                        // Обрабатываем причину отклонения
+                        handleReviewRejectionReason(update, userInThread);
+                        metricsService.stopMessageProcessing(sample);
+                        return;
+                    }
+                }
+            }
             metricsService.stopMessageProcessing(sample);
             return;
         }
@@ -237,6 +264,14 @@ public class MessageProcessing {
                 return;
             }
             
+            // Проверяем, не идет ли процесс отправки скриншота кешбека
+            if (state != null && state.startsWith("CASHBACK_SCREENSHOT_")) {
+                int purchaseId = Integer.parseInt(state.substring("CASHBACK_SCREENSHOT_".length()));
+                handleCashbackScreenshotWithCard(update, user, purchaseId);
+                metricsService.stopMessageProcessing(sample);
+                return;
+            }
+            
             ReviewRequestSession reviewSession = RedisSessionStore.getReviewSession(chatId);
             if (reviewSession != null) {
                 if (reviewSession.getStep() == ReviewRequestSession.Step.SEARCH_SCREENSHOT) {
@@ -257,9 +292,15 @@ public class MessageProcessing {
                     metricsService.stopMessageProcessing(sample);
                     return;
                 } else {
-                    // Фотография без активной сессии - начинаем процесс с поиска товара
-                    System.out.println("🚨 No active session - starting search process");
-                    startSearchProcess(update, user);
+                    // Медиа без активной сессии — подсказываем, куда зайти
+                    System.out.println("🚨 No active session for media — showing navigation hint");
+                    Sent hintSender = new Sent();
+                    String hint = "📸 Получено медиа без активного процесса.\n\n" +
+                            "Чтобы отправить скриншоты/видео, пожалуйста, перейдите в соответствующий раздел:\n\n" +
+                            "• Каталог товаров — для скриншотов поиска и доставки при покупке\n" +
+                            "• Оставить отзыв — для фото/видео отзыва после получения товара\n" +
+                            "• Получить кешбек — для скриншота опубликованного отзыва";
+                    hintSender.sendMessage(user, hint);
                     metricsService.stopMessageProcessing(sample);
                     return;
                 }
@@ -270,6 +311,7 @@ public class MessageProcessing {
 
         // Обрабатываем состояния, которые не зависят от наличия медиа
         String textState = RedisSessionStore.getState(chatId);
+        System.out.println("🔍 DEBUG: Processing text message, textState = " + textState + ", userId = " + user.getIdUser());
         
         // ПРИОРИТЕТНАЯ ПРОВЕРКА: Обрабатываем кнопку "Назад" в первую очередь
         if(msg!=null && msg.equals("⬅️ Назад")) {
@@ -285,6 +327,9 @@ public class MessageProcessing {
                 Sent sent = new Sent();
                 sent.sendMessage(user, "❌ Подача отзыва отменена. Вы вернулись в главное меню.");
             }
+            
+            // Отменяем бронь товара при выходе из процесса покупки
+            cancelUserReservation(user, chatId);
             
             // Очищаем все остальные состояния сессии при возврате в главное меню
             RedisSessionStore.removeReviewSession(chatId);
@@ -305,27 +350,86 @@ public class MessageProcessing {
             }
         }
         
-        if (textState != null && textState.equals("REVIEW_SUBMISSION")) {
+        if (textState != null && (textState.equals("REVIEW_SUBMISSION") || textState.equals("REVIEW_SUBMISSION_TEXT"))) {
             ReviewSubmissionSession session = RedisSessionStore.getReviewSubmissionSession(user.getIdUser());
-            if (session != null && session.getStep() == ReviewSubmissionSession.Step.MEDIA) {
-                // Если шаг MEDIA, обрабатываем как медиа
-                handleReviewMedia(update, user);
-                metricsService.stopMessageProcessing(sample);
-                return;
+            System.out.println("🔍 DEBUG: textState = " + textState + ", session = " + (session != null ? "found" : "null"));
+            if (session != null) {
+                System.out.println("🔍 DEBUG: session step = " + session.getStep());
+                if (session.getStep() == ReviewSubmissionSession.Step.TEXT) {
+                    System.out.println("🔍 DEBUG: Calling handleReviewTextSubmission");
+                    // Если шаг TEXT, обрабатываем как текст отзыва
+                    handleReviewTextSubmission(update, user);
+                    metricsService.stopMessageProcessing(sample);
+                    return;
+                }
+                if (session.getStep() == ReviewSubmissionSession.Step.MEDIA) {
+                    System.out.println("🔍 DEBUG: Calling handleReviewMedia");
+                    // Если шаг MEDIA, обрабатываем как медиа
+                    handleReviewMedia(update, user);
+                    metricsService.stopMessageProcessing(sample);
+                    return;
+                }
             }
+        }
+        
+        // Обработка ввода номера карты для кешбека
+        if (textState != null && textState.startsWith("CASHBACK_CARD_INPUT_")) {
+            int purchaseId = Integer.parseInt(textState.substring("CASHBACK_CARD_INPUT_".length()));
+            handleCashbackCardInput(update, user, purchaseId);
+            metricsService.stopMessageProcessing(sample);
+            return;
+        }
+        
+        // Обработка ввода username для блокировки пользователя
+        if (textState != null && textState.equals("ADMIN_BLOCK_USER")) {
+            handleBlockUserInput(update, user);
+            metricsService.stopMessageProcessing(sample);
+            return;
         }
 
         if(msg!=null){
             
             switch (msg) {
-                case "/start" -> logicUI.sendStart(chatId, update);
+                case "/start" -> {
+                    // Отменяем бронь товара при переходе в главное меню
+                    cancelUserReservation(user, chatId);
+                    logicUI.sendStart(chatId, update);
+                }
                            case "Админ меню" -> {
                                // Показываем админ-меню (обычное меню остается)
                                logicUI.showAdminMenu(user);
                                metricsService.recordAdminAction();
                            }
-                case "Каталог товаров" -> logicUI.sendProducts(user);
+                case "Каталог товаров" -> {
+                    if (user.isBlock()) break;
+                    // Ограничение: не чаще 1 заказа в 14 дней (кроме администраторов)
+                    if (!user.isAdmin()) {
+                        PurchaseDAO purchaseDAO = new PurchaseDAO();
+                        List<Purchase> purchases = purchaseDAO.findByUserId(user.getIdUser());
+                        java.time.LocalDate lastOrderDate = null;
+                        for (Purchase p : purchases) {
+                            if (p.getDate() != null) {
+                                if (lastOrderDate == null || p.getDate().isAfter(lastOrderDate)) {
+                                    lastOrderDate = p.getDate();
+                                }
+                            }
+                        }
+                        if (lastOrderDate != null && lastOrderDate.isAfter(java.time.LocalDate.now().minusDays(14))) {
+                            java.time.LocalDate nextAllowed = lastOrderDate.plusDays(14);
+                            Sent sent = new Sent();
+                            String msgText = "⏳ Вы можете заказывать товар не чаще чем раз в 14 дней.";
+                            msgText += "\n\n📅 Последний заказ: " + formatLocalDate(lastOrderDate);
+                            msgText += "\n🔓 Следующая доступная дата: " + formatLocalDate(nextAllowed);
+                            sent.sendMessage(user, msgText);
+                            break; // не показываем список товаров
+                        }
+                    }
+                    // Отменяем бронь товара при переходе в каталог
+                    cancelUserReservation(user, chatId);
+                    logicUI.sendProducts(user);
+                }
                 case "Оставить отзыв" -> {
+                    if (user.isBlock()) break;
                     // Показываем товары пользователя для выбора отзыва
                     logicUI.showUserProductsForReview(user);
                 }
@@ -334,10 +438,12 @@ public class MessageProcessing {
                     createTelegramBot.sendMessage(user, "🆘 Техподдержка: " + supportMention + "\n\nОпишите вашу проблему, и мы обязательно поможем!");
                 }
                 case "Получить кешбек" -> {
+                    if (user.isBlock()) break;
                     // Показываем покупки пользователя для получения кешбека
                     logicUI.showUserPurchases(user);
                 }
                 case "Личный кабинет" -> {
+                    if (user.isBlock()) break;
                     // Показываем личный кабинет пользователя
                     logicUI.showUserCabinet(user);
                 }
@@ -347,7 +453,12 @@ public class MessageProcessing {
                     logicUI.sendMenu(user, null);
                 }
                 case "Отмена покупки товара" -> {
+                    // Отменяем бронь товара
+                    cancelUserReservation(user, chatId);
+                    
+                    // Очищаем сессию и возвращаемся в каталог
                     RedisSessionStore.removeState(chatId);
+                    RedisSessionStore.removeReviewSession(chatId);
                     logicUI.sendProducts(user);
                 }
             }
@@ -493,7 +604,7 @@ public class MessageProcessing {
                                 session.setStep(ReviewRequestSession.Step.DELIVERY_SCREENSHOT);
                                 logicUI.sentBack(user, "📦 Прикрепите скриншот раздела доставки с подтверждением заказа:", "Отмена покупки товара");
                             } else {
-                                createTelegramBot.sendMessage(user, "❌ Принимаем только карты Сбербанка. Пожалуйста, введите \"Сбер\" или \"Сбербанк\":");
+                                createTelegramBot.sendMessage(user, "❌ Принимаем только карты Сбербанка. Пожалуйста, введите \"Сбер\":");
                             }
                             break;
 
@@ -573,8 +684,17 @@ public class MessageProcessing {
             }
             
             if("REVIEW_REJECTION".equals(state)){
+                System.out.println("🔍 DEBUG: Processing REVIEW_REJECTION state for user " + user.getIdUser());
                 // Обработка ввода причины отказа отзыва
                 handleReviewRejectionReason(update, user);
+                return;
+            }
+            
+            // Проверяем, есть ли активная сессия отмены покупки
+            PurchaseCancellationSession cancellationSession = RedisSessionStore.getPurchaseCancellationSession(chatId);
+            if (cancellationSession != null) {
+                // Обрабатываем причину отмены покупки
+                handlePurchaseCancellationReason(update, user, cancellationSession);
                 return;
             }
             
@@ -588,6 +708,18 @@ public class MessageProcessing {
         } finally {
             // Завершаем измерение времени обработки
             metricsService.stopMessageProcessing(sample);
+        }
+    }
+
+    /**
+     * Отменить бронь товара для пользователя
+     */
+    private void cancelUserReservation(User user, long chatId) {
+        ReviewRequestSession reviewRequestSession = RedisSessionStore.getReviewSession(chatId);
+        if (reviewRequestSession != null && reviewRequestSession.getProduct() != null) {
+            ReservationService reservationService = ReservationService.getInstance();
+            reservationService.cancelReservation(user, reviewRequestSession.getProduct());
+            System.out.println("🔄 Reservation cancelled for user " + user.getIdUser() + " due to navigation");
         }
     }
 
@@ -611,6 +743,17 @@ public class MessageProcessing {
         
         PhotoSize photo = message.getPhoto().get(message.getPhoto().size() - 1);
         String fileId = photo.getFileId();
+        
+        // Проверяем, не отправлял ли пользователь уже этот скриншот
+        if (session.getSearchScreenshotMessageId() != null) {
+            createTelegramBot.sendMessage(user, "⚠️ Вы уже отправили скриншот поиска. Пожалуйста, перейдите к следующему шагу.");
+            return;
+        }
+        
+        // Сохраняем file_id и ID сообщения в сессии для последующей отправки
+        session.setSearchScreenshotFileId(fileId);
+        session.setSearchScreenshotMessageId(message.getMessageId());
+        RedisSessionStore.setReviewSession(chatId, session);
         
         // Отправляем пользователю сообщение о начале обработки
         createTelegramBot.sendMessage(user, "🔄 Обрабатываю скриншот поиска, пожалуйста подождите...");
@@ -676,13 +819,30 @@ public class MessageProcessing {
         PhotoSize photo = message.getPhoto().get(message.getPhoto().size() - 1);
         String fileId = photo.getFileId();
         
+        // Проверяем, не отправлял ли пользователь уже этот скриншот
+        if (session.getDeliveryScreenshotMessageId() != null) {
+            createTelegramBot.sendMessage(user, "⚠️ Вы уже отправили скриншот доставки. Пожалуйста, перейдите к следующему шагу.");
+            return;
+        }
+        
+        // Сохраняем file_id и ID сообщения в сессии для последующей отправки
+        session.setDeliveryScreenshotFileId(fileId);
+        session.setDeliveryScreenshotMessageId(message.getMessageId());
+        RedisSessionStore.setReviewSession(chatId, session);
+        
         // Отправляем пользователю сообщение о начале обработки
         createTelegramBot.sendMessage(user, "🔄 Обрабатываю скриншот доставки, пожалуйста подождите...");
         
         // Асинхронная обработка скриншота доставки
+        System.out.println("🔍 Debug: Starting delivery screenshot processing");
+        System.out.println("🔍 Debug: session = " + session);
+        System.out.println("🔍 Debug: session.getProduct() = " + (session != null ? session.getProduct() : "null"));
+        System.out.println("🔍 Debug: session.getRequest() = " + (session != null ? session.getRequest() : "null"));
+        
         AsyncService.processDeliveryScreenshotAsync(session, user, photo, fileId)
             .thenRun(() -> {
                 // Успешная обработка
+                System.out.println("🔍 Debug: Delivery screenshot processing completed successfully");
                 String finishText =
                         "Спасибо за участие!\n\n" +
                         "После получения товара (на следующий день после забора с ПВЗ):\n" +
@@ -691,48 +851,57 @@ public class MessageProcessing {
                         "3️⃣ После утверждения отзыва администратором, перейдите в раздел " +
                         "→ «💸 Получить кешбек» и отправьте скриншот вашего отзыва";
 
+                // Бронь остается активной, так как покупка завершена успешно
+                // Количество участников остается увеличенным
+                
                 LogicUI logicUI = new LogicUI();
                 logicUI.sendMenu(user, finishText);
                 RedisSessionStore.removeReviewSession(chatId);
                 
-                // Отменяем бронь
-                ReservationManager.getInstance().cancelReservation(chatId);
-                
                 // Уведомление в группу с двумя фотографиями
-                String text =
-                        "Пользователь купил товар \"" + session.getProduct().getProductName() + "\"\n"
-                        + "ФИО: " + session.getRequest().getFullName() + "\n"
-                        + "Номер телефона: <code>" + session.getRequest().getPhoneNumber() + "</code>\n"
-                        + "Банк: " + session.getRequest().getBankName() + "\n"
-                        + "Реквизиты: <code>" + session.getRequest().getCardNumber() + "</code>\n"
-                        + "Стоимость для пользователя: <code>" + session.getRequest().getPurchaseAmount() + "</code>\n";
+                String text = "";
+                if (session.getProduct() != null && session.getRequest() != null) {
+                    text = "Пользователь купил товар \"" + session.getProduct().getProductName() + "\"\n"
+                            + "ФИО: " + session.getRequest().getFullName() + "\n"
+                            + "Номер телефона: <code>" + session.getRequest().getPhoneNumber() + "</code>\n"
+                            + "Банк: " + session.getRequest().getBankName() + "\n"
+                            + "Реквизиты: <code>" + session.getRequest().getCardNumber() + "</code>\n"
+                            + "Стоимость для пользователя: <code>" + session.getRequest().getPurchaseAmount() + "</code>\n";
+                } else {
+                    text = "Пользователь завершил покупку товара";
+                }
                 
-                Long groupMessageId = createTelegramBot.sendTwoPhotosToGroup(user, text, session.getSearchScreenshotPath(), session.getDeliveryScreenshotPath());
+                String searchFileId = session.getSearchScreenshotFileId();
+                String deliveryFileId = session.getDeliveryScreenshotFileId();
+                
+                Long groupMessageId = null;
+                if (searchFileId != null && deliveryFileId != null) {
+                    groupMessageId = createTelegramBot.sendTwoPhotosToGroup(user, text, searchFileId, deliveryFileId);
+                } else {
+                    System.err.println("⚠️ Missing screenshot file IDs: search=" + searchFileId + ", delivery=" + deliveryFileId);
+                }
                 
                 // Сохраняем ID сообщения в сессии для последующего сохранения в БД
                 session.setGroupMessageId(groupMessageId);
                 
-                // Обновляем orderMessageId в уже созданной покупке
-                if (groupMessageId != null) {
-                    // Находим последнюю покупку пользователя для этого товара
+                // Обновляем orderMessageId в созданной покупке
+                if (groupMessageId != null && session.getPurchaseId() != null) {
                     PurchaseDAO purchaseDAO = new PurchaseDAO();
-                    List<Purchase> userPurchases = purchaseDAO.findByUserId(user.getIdUser());
+                    Purchase purchase = purchaseDAO.findById(session.getPurchaseId());
                     
-                    Purchase latestPurchase = null;
-                    for (Purchase purchase : userPurchases) {
-                        if (purchase.getProduct().getIdProduct() == session.getProduct().getIdProduct() &&
-                            purchase.getOrderMessageId() == null) {
-                            latestPurchase = purchase;
-                            break;
-                        }
-                    }
-                    
-                    if (latestPurchase != null) {
-                        latestPurchase.setOrderMessageId(groupMessageId);
-                        latestPurchase.setGroupMessageId(groupMessageId);
-                        purchaseDAO.update(latestPurchase);
+                    if (purchase != null) {
+                        purchase.setOrderMessageId(groupMessageId);
+                        purchase.setGroupMessageId(groupMessageId);
+                        purchaseDAO.update(purchase);
+                        
+                        System.out.println("✅ Updated purchase ID " + session.getPurchaseId() + " with orderMessageId: " + groupMessageId);
+                    } else {
+                        System.err.println("❌ Purchase not found with ID: " + session.getPurchaseId());
                     }
                 }
+                
+                // Медиа уже отправлены в sendTwoPhotosToGroup выше
+                System.out.println("✅ All media sent to user topic via sendTwoPhotosToGroup");
             })
             .exceptionally(throwable -> {
                 System.err.println("❌ Delivery screenshot processing error: " + throwable.getMessage());
@@ -782,6 +951,16 @@ public class MessageProcessing {
                     if (filePath != null) {
                         // Успешная обработка
                         session.getProduct().setPhoto(filePath);
+                        
+                        // Отправляем товар в группу с темами
+                        try {
+                            Long groupMessageId = sendProductToGroup(session.getProduct(), filePath);
+                            session.getProduct().setGroupMessageId(groupMessageId);
+                        } catch (Exception e) {
+                            System.err.println("❌ Error sending product to group: " + e.getMessage());
+                            e.printStackTrace();
+                        }
+                        
                         ProductDAO productDAO = new ProductDAO();
                         productDAO.save(session.getProduct());
                         
@@ -860,6 +1039,7 @@ public class MessageProcessing {
             data.equals("admin_settings") || data.equals("admin_add_product") || data.equals("admin_user_management") ||
             data.equals("admin_add_admin") || data.equals("admin_change_support") || data.equals("admin_back_to_menu") ||
             data.equals("admin_back_to_main_menu") || data.equals("admin_back_to_admin_menu") || data.equals("admin_back_to_products") ||
+            data.equals("admin_block_user") ||
             data.startsWith("admin_product_") || data.startsWith("admin_user_") || data.startsWith("admin_back_to_purchases_") ||
             data.startsWith("admin_edit_product_") || data.startsWith("admin_edit_product_name_") ||
             data.startsWith("admin_edit_product_articul_") || data.startsWith("admin_edit_product_cashback_") ||
@@ -933,6 +1113,10 @@ public class MessageProcessing {
                 case "back_to_menu":{
                     // Возвращаемся в главное меню
                     System.out.println("🏠 Back to menu button pressed by user: " + user.getUsername());
+                    
+                    // Отменяем бронь товара при выходе из процесса покупки
+                    cancelUserReservation(user, chatId);
+                    
                     System.out.println("🏠 Deleting message ID: " + messageId);
                     // Удаляем текущее сообщение с inline кнопками
                     safeDeleteMessage(user.getIdUser(), messageId);
@@ -943,24 +1127,126 @@ public class MessageProcessing {
                 }
                 case "Exit_Product":{
                     // Не удаляем сообщение, так как оно уже было заменено на информацию о товаре
+                    // Отменяем бронь товара при выходе из карточки товара
+                    cancelUserReservation(user, chatId);
+                    
                     // Просто показываем каталог товаров
                     logicUI.sendProducts(user);
                     break;
                 }
+                case "product_sold_out":{
+                    Sent sent = new Sent();
+                    sent.sendMessage(user, "❌ К сожалению, все товары в этой акции уже выкуплены. " +
+                                       "Попробуйте выбрать другой товар из каталога.");
+                    break;
+                }
+                case "product_reserved":{
+                    Sent sent = new Sent();
+                    sent.sendMessage(user, "⏳ Этот товар уже забронирован другим пользователем. Попробуйте позже.");
+                    break;
+                }
+                case "order_rate_limited":{
+                    // Сообщение при ограничении частоты заказов (ранее, на выборе товара)
+                    PurchaseDAO purchaseDAO = new PurchaseDAO();
+                    List<Purchase> purchases = purchaseDAO.findByUserId(user.getIdUser());
+                    java.time.LocalDate lastOrderDate = null;
+                    for (Purchase p : purchases) {
+                        if (p.getDate() != null) {
+                            if (lastOrderDate == null || p.getDate().isAfter(lastOrderDate)) {
+                                lastOrderDate = p.getDate();
+                            }
+                        }
+                    }
+                    java.time.LocalDate nextAllowed = lastOrderDate != null ? lastOrderDate.plusDays(14) : null;
+                    Sent sent = new Sent();
+                    String msgText = "⏳ Вы можете заказывать товар не чаще чем раз в 14 дней.";
+                    if (lastOrderDate != null) {
+                        msgText += "\n\n📅 Последний заказ: " + formatLocalDate(lastOrderDate);
+                    }
+                    if (nextAllowed != null) {
+                        msgText += "\n🔓 Следующая доступная дата: " + formatLocalDate(nextAllowed);
+                    }
+                    sent.sendMessage(user, msgText);
+                    break;
+                }
                 case "buy_product":{
                     ProductDAO productDAO = new ProductDAO();
+                    // Для buy_product messageID содержит ID товара
                     Product product = productDAO.findById(Integer.parseInt(messageID));
+                    
+                    if (product == null) {
+                        Sent sent = new Sent();
+                        sent.sendMessage(user, "❌ Товар не найден");
+                        break;
+                    }
+                    
+                    // Ограничение: не чаще 1 заказа в 14 дней (кроме администраторов)
+                    if (!user.isAdmin()) {
+                        PurchaseDAO purchaseDAO = new PurchaseDAO();
+                        List<Purchase> recentPurchases = purchaseDAO.findByUserId(user.getIdUser());
+                        java.time.LocalDate now = java.time.LocalDate.now();
+                        java.time.LocalDate lastOrderDate = null;
+                        for (Purchase p : recentPurchases) {
+                            if (p.getDate() != null) {
+                                if (lastOrderDate == null || p.getDate().isAfter(lastOrderDate)) {
+                                    lastOrderDate = p.getDate();
+                                }
+                            }
+                        }
+                        if (lastOrderDate != null && lastOrderDate.isAfter(now.minusDays(14))) {
+                            java.time.LocalDate nextAllowed = lastOrderDate.plusDays(14);
+                            Sent sent = new Sent();
+                            sent.sendMessage(user,
+                                "⏳ Вы можете заказывать товар не чаще чем раз в 14 дней.\n\n" +
+                                "📅 Последний заказ: " + formatLocalDate(lastOrderDate) + "\n" +
+                                "🔓 Следующая доступная дата: " + formatLocalDate(nextAllowed));
+                            break;
+                        }
+                    }
+
+                    // Проверяем, не покупал ли пользователь этот товар ранее
+                    PurchaseDAO purchaseDAO = new PurchaseDAO();
+                    List<Purchase> userPurchases = purchaseDAO.findByUserId(user.getIdUser());
+                    boolean hasPurchased = false;
+                    for (Purchase purchase : userPurchases) {
+                        if (purchase.getProduct() != null && purchase.getProduct().getIdProduct() == product.getIdProduct()) {
+                            hasPurchased = true;
+                            break;
+                        }
+                    }
+                    
+                    if (hasPurchased) {
+                        Sent sent = new Sent();
+                        sent.sendMessage(user, "❌ Вы уже покупали этот товар. Выберите другой товар из каталога.");
+                        break;
+                    }
+                    
+                    // Пытаемся забронировать товар
+                    ReservationService reservationService = ReservationService.getInstance();
+                    boolean reserved = reservationService.reserveProduct(user, product);
+                    
+                    if (!reserved) {
+                        Sent sent = new Sent();
+                        sent.sendMessage(user, "❌ К сожалению, все товары в этой акции уже выкуплены или забронированы. " +
+                                           "Попробуйте выбрать другой товар.");
+                        break;
+                    }
+                    
+                    // Товар успешно забронирован
                     ReviewRequestSession session = new ReviewRequestSession();
                     session.setProduct(product);
                     session.setStep(ReviewRequestSession.Step.SEARCH_SCREENSHOT);
-                    RedisSessionStore.setReviewSession(chatId,session);
+                    RedisSessionStore.setReviewSession(chatId, session);
 
                     RedisSessionStore.setState(chatId, "REVIEW_REQUEST");
                     
                     // Регистрируем запрос на покупку
                     MetricsService.getInstance().recordPurchaseRequest();
 
-                    logicUI.sentBack(user, "📸 Прикрепите скриншот поиска товара на Wildberries с поисковой строкой и найденным товаром:", "Отмена покупки товара");
+                    String reservationMessage = "✅ Товар забронирован за вами на 30 минут!\n\n" +
+                            "📸 Прикрепите скриншот поиска товара на Wildberries с поисковой строкой и найденным товаром:";
+                    
+                    logicUI.sentBack(user, reservationMessage, "Отмена покупки товара");
 
                     break;
                 }
@@ -990,6 +1276,11 @@ public class MessageProcessing {
                 }
             }
         }
+    }
+
+    private String formatLocalDate(java.time.LocalDate date) {
+        if (date == null) return "Не указано";
+        return String.format("%02d.%02d.%02d", date.getDayOfMonth(), date.getMonthValue(), date.getYear() % 100);
     }
 
     /**
@@ -1049,6 +1340,13 @@ public class MessageProcessing {
                 safeDeleteMessage(user.getIdUser(), messageId);
                 logicUI.showUserManagementMenu(user);
             }
+            case "admin_block_user" -> {
+                System.out.println("🚫 Block user");
+                safeDeleteMessage(user.getIdUser(), messageId);
+                logicUI.showBlockUserInterface(user);
+                // Устанавливаем состояние для ввода username
+                RedisSessionStore.setState(user.getIdUser(), "ADMIN_BLOCK_USER");
+            }
             case "admin_add_admin" -> {
                 System.out.println("➕ Adding admin");
                 changeAdminSettings(user, messageId);
@@ -1080,9 +1378,14 @@ public class MessageProcessing {
                 if (callbackData.startsWith("admin_product_")) {
                     int productId = Integer.parseInt(callbackData.substring("admin_product_".length()));
                     System.out.println("🛒 Showing product purchases for ID: " + productId);
+                    
+                    long startTime = System.currentTimeMillis();
                     TelegramBot telegramBot = new TelegramBot();
                     telegramBot.deleteMessage(user.getIdUser(), messageId);
                     logicUI.showProductPurchases(user, productId);
+                    long endTime = System.currentTimeMillis();
+                    
+                    System.out.println("⏱️ Product purchases loaded in " + (endTime - startTime) + " ms");
                 } else if (callbackData.startsWith("admin_user_")) {
                     int purchaseId = Integer.parseInt(callbackData.substring("admin_user_".length()));
                     System.out.println("👤 Showing purchase details for ID: " + purchaseId);
@@ -1095,6 +1398,12 @@ public class MessageProcessing {
                     TelegramBot telegramBot = new TelegramBot();
                     telegramBot.deleteMessage(user.getIdUser(), messageId);
                     logicUI.showProductPurchases(user, productId);
+                } else if (callbackData.startsWith("admin_cancel_purchase_")) {
+                    int purchaseId = Integer.parseInt(callbackData.substring("admin_cancel_purchase_".length()));
+                    System.out.println("❌ Cancelling purchase ID: " + purchaseId);
+                    TelegramBot telegramBot = new TelegramBot();
+                    telegramBot.deleteMessage(user.getIdUser(), messageId);
+                    handleCancelPurchase(user, purchaseId);
                 } else if (callbackData.startsWith("admin_edit_product_name_")) {
                     int productId = Integer.parseInt(callbackData.substring("admin_edit_product_name_".length()));
                     System.out.println("✏️ Editing product name for ID: " + productId);
@@ -1147,6 +1456,214 @@ public class MessageProcessing {
     }
 
     /**
+     * Обработка отмены покупки администратором
+     */
+    private void handleCancelPurchase(User admin, int purchaseId) {
+        try {
+            PurchaseDAO purchaseDAO = new PurchaseDAO();
+            Purchase purchase = purchaseDAO.findById(purchaseId);
+            
+            if (purchase == null) {
+                Sent sent = new Sent();
+                sent.sendMessage(admin, "❌ Покупка не найдена");
+                return;
+            }
+            
+            // Проверяем, что покупка не завершена полностью
+            if (purchase.getPurchaseStage() >= 4) {
+                Sent sent = new Sent();
+                sent.sendMessage(admin, "❌ Нельзя отменить завершенную покупку");
+                return;
+            }
+            
+            // Создаем сессию для ввода причины отмены
+            PurchaseCancellationSession cancellationSession = new PurchaseCancellationSession(admin, purchase);
+            RedisSessionStore.savePurchaseCancellationSession(admin.getIdUser(), cancellationSession);
+            
+            // Запрашиваем причину отмены
+            String message = "❌ Отмена покупки\n\n" +
+                           "👤 Пользователь: @" + (purchase.getUser() != null ? purchase.getUser().getUsername() : "Unknown") + "\n" +
+                           "📦 Товар: " + purchase.getProduct().getProductName() + "\n" +
+                           "📅 Дата: " + purchase.getDate() + "\n\n" +
+                           "📝 Пожалуйста, укажите причину отмены покупки:";
+            
+            Sent sent = new Sent();
+            sent.sendMessage(admin, message);
+            
+            System.out.println("📝 Requesting cancellation reason for purchase " + purchaseId + " from admin " + admin.getUsername());
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error requesting cancellation reason for purchase " + purchaseId + ": " + e.getMessage());
+            e.printStackTrace();
+            
+            Sent sent = new Sent();
+            sent.sendMessage(admin, "❌ Ошибка при запросе причины отмены: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Обработка ввода причины отмены покупки
+     */
+    private void handlePurchaseCancellationReason(Update update, User admin, PurchaseCancellationSession cancellationSession) {
+        try {
+            String reason = update.getMessage().getText();
+            cancellationSession.setReason(reason);
+            cancellationSession.setReasonEntered(true);
+            
+            // Сохраняем обновленную сессию
+            RedisSessionStore.savePurchaseCancellationSession(admin.getIdUser(), cancellationSession);
+            
+            // Выполняем отмену покупки с указанной причиной
+            processPurchaseCancellation(admin, cancellationSession);
+            
+            // Удаляем сессию
+            RedisSessionStore.removePurchaseCancellationSession(admin.getIdUser());
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error processing purchase cancellation reason: " + e.getMessage());
+            e.printStackTrace();
+            
+            Sent sent = new Sent();
+            sent.sendMessage(admin, "❌ Ошибка при обработке причины отмены: " + e.getMessage());
+            
+            // Удаляем сессию в случае ошибки
+            RedisSessionStore.removePurchaseCancellationSession(admin.getIdUser());
+        }
+    }
+    
+    /**
+     * Выполнение отмены покупки с указанной причиной
+     */
+    private void processPurchaseCancellation(User admin, PurchaseCancellationSession cancellationSession) {
+        try {
+            Purchase purchase = cancellationSession.getPurchase();
+            String reason = cancellationSession.getReason();
+            
+            // Уменьшаем количество участников товара
+            Product product = purchase.getProduct();
+            if (product != null) {
+                ReservationManager.decrementProductParticipants(product.getIdProduct());
+                System.out.println("📉 Decremented participants for product " + product.getIdProduct() + " due to purchase cancellation");
+            }
+            
+            // Обновляем статус покупки на отмененную (статус -1)
+            purchase.setPurchaseStage(-1);
+            PurchaseDAO purchaseDAO = new PurchaseDAO();
+            purchaseDAO.update(purchase);
+            
+            // Отправляем уведомление пользователю в его тему в группе
+            User purchaseUser = purchase.getUser();
+            if (purchaseUser != null) {
+                try {
+                    ResourceBundle rb = ResourceBundle.getBundle("app");
+                    long groupID = Long.parseLong(rb.getString("tg.group"));
+                    int userSubgroupId = purchaseUser.getId_message();
+                    
+                    String message = "❌ Ваша покупка была отменена администратором\n\n" +
+                                   "📦 Товар: " + product.getProductName() + "\n" +
+                                   "📅 Дата: " + purchase.getDate() + "\n" +
+                                   "📝 Причина отмены: " + reason + "\n\n" +
+                                   "Если у вас есть вопросы, обратитесь к администратору.";
+                    
+                    Sent sent = new Sent();
+                    sent.sendMessageUser(groupID, userSubgroupId, message);
+                    
+                    System.out.println("📤 Cancellation notification sent to user " + purchaseUser.getUsername() + " in group topic");
+                } catch (Exception e) {
+                    System.err.println("❌ Error sending notification to group topic: " + e.getMessage());
+                    // Fallback: отправляем в личные сообщения
+                    String message = "❌ Ваша покупка была отменена администратором\n\n" +
+                                   "📦 Товар: " + product.getProductName() + "\n" +
+                                   "📅 Дата: " + purchase.getDate() + "\n" +
+                                   "📝 Причина отмены: " + reason + "\n\n" +
+                                   "Если у вас есть вопросы, обратитесь к администратору.";
+                    
+                    Sent sent = new Sent();
+                    sent.sendMessage(purchaseUser, message);
+                    
+                    System.out.println("📤 Cancellation notification sent to user " + purchaseUser.getUsername() + " in private chat");
+                }
+            }
+            
+            // Отправляем подтверждение администратору
+            String adminMessage = "✅ Покупка успешно отменена\n\n" +
+                                "👤 Пользователь: @" + (purchaseUser != null ? purchaseUser.getUsername() : "Unknown") + "\n" +
+                                "📦 Товар: " + product.getProductName() + "\n" +
+                                "📅 Дата: " + purchase.getDate() + "\n" +
+                                "📝 Причина: " + reason + "\n\n" +
+                                "Количество участников товара уменьшено на 1";
+            
+            Sent sent = new Sent();
+            sent.sendMessage(admin, adminMessage);
+            
+            System.out.println("✅ Purchase " + purchase.getIdPurchase() + " cancelled by admin " + admin.getUsername() + " with reason: " + reason);
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error processing purchase cancellation: " + e.getMessage());
+            e.printStackTrace();
+            
+            Sent sent = new Sent();
+            sent.sendMessage(admin, "❌ Ошибка при отмене покупки: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Экранирование HTML-символов для безопасной отправки
+     */
+    private String escapeHtml(String text) {
+        if (text == null) return "";
+        return text.replace("&", "&amp;")
+                  .replace("<", "&lt;")
+                  .replace(">", "&gt;")
+                  .replace("\"", "&quot;")
+                  .replace("'", "&#x27;");
+    }
+
+    /**
+     * Отправка товара в группу с темами (в формате для пользователя)
+     */
+    private Long sendProductToGroup(Product product, String photoPath) throws Exception {
+        try {
+            ResourceBundle rb = ResourceBundle.getBundle("app");
+            long groupID = Long.parseLong(rb.getString("tg.group"));
+            
+            // Формируем текст сообщения точно как для пользователя
+            String productText = "Вы выбрали товар: " + escapeHtml(product.getProductName()) + " \n" +
+                    "\n" +
+                    "Кешбек " + product.getCashbackPercentage() + "% после публикации отзыва 🙏\n" +
+                    "Принимаем только карты Сбера (Россия)\n" +
+                    "\n" +
+                    "Условия участия:\n" +
+                    "- Подпишитесь на наш канал @adaptix_focus 😉\n" +
+                    "- Сделайте скриншот поисковой строки (мы его можем запросить)\n" +
+                    "- Найдите наш товар по запросу \"" + escapeHtml(product.getKeyQuery()) + "\" 🔎\n" +
+                    "- Закажите товар и заполните заявку\n" +
+                    "- Заберите товар с ПВЗ в течении 3 дней👍\n" +
+                    "- Согласуйте свой отзыв с фотографиями в нашем боте\n" +
+                    "- Оставьте свой отзыв и заполните форму получения кешбека (только когда отзыв опубликовали)\n" +
+                    "- Кешбек ВЫПЛАЧИВАЕТСЯ В ПН И ПТ💳\n" +
+                    "\n" +
+                    "Важно:\n" +
+                    "- Участвовать можно только в одной раздаче на один аккаунт не чаще чем раз в две недели\n" +
+                    "- ФИО в заказе должно совпадать с номером карты👤\n" +
+                    "- Качественные фотографии в отзыве обязательны📸\n" +
+                    "- Отзыв нужно оставить не позднее 3 дней после забора товара с ПВЗ 📅\n" +
+                    "- Желающие возвращать товар на ПВЗ не могут участвовать в акции 🚫";
+            
+            // Отправляем сообщение с фотографией в группу через TelegramBot
+            TelegramBot telegramBot = new TelegramBot();
+            Long messageId = telegramBot.sendPhotoToGroup(groupID, photoPath, productText);
+            
+            System.out.println("✅ Product sent to group " + groupID + " with message ID: " + messageId);
+            return messageId;
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error sending product to group: " + e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
      * Обработка callback query для подтверждения/отклонения отзывов в группе
      */
     private void handleGroupReviewCallback(Update update, String data) {
@@ -1166,19 +1683,26 @@ public class MessageProcessing {
                 Purchase purchase = purchaseDAO.findById(purchaseId);
                 
                 if (purchase != null) {
-                    // Подтверждаем отзыв - передаем реального пользователя
-                    User reviewUser = purchase.getUser();
-                    reviewUser.setAdmin(true); // Временно делаем админом для обработки
-                    handleReviewApproval(reviewUser, purchaseId, true);
+                    // Получаем администратора, который нажал кнопку
+                    Long adminChatId = update.getCallbackQuery().getFrom().getId();
+                    UserDAO userDAO = new UserDAO();
+                    User admin = userDAO.findById(adminChatId);
                     
-                    // Отвечаем на callback query
-                    AnswerCallbackQuery answerCallbackQuery = new AnswerCallbackQuery();
-                    answerCallbackQuery.setCallbackQueryId(update.getCallbackQuery().getId());
-                    answerCallbackQuery.setText("✅ Отзыв подтвержден!");
-                    answerCallbackQuery.setShowAlert(false);
-                    
-                    Sent sent = new Sent();
-                    sent.answerCallbackQuery(answerCallbackQuery);
+                    if (admin != null && admin.isAdmin()) {
+                        // Подтверждаем отзыв - передаем администратора
+                        handleReviewApproval(admin, purchaseId, true);
+                        
+                        // Отвечаем на callback query
+                        AnswerCallbackQuery answerCallbackQuery = new AnswerCallbackQuery();
+                        answerCallbackQuery.setCallbackQueryId(update.getCallbackQuery().getId());
+                        answerCallbackQuery.setText("✅ Отзыв подтвержден!");
+                        answerCallbackQuery.setShowAlert(false);
+                        
+                        Sent sent = new Sent();
+                        sent.answerCallbackQuery(answerCallbackQuery);
+                    } else {
+                        System.err.println("❌ Admin not found or not authorized: " + adminChatId);
+                    }
                 }
                 
             } else if (data.startsWith("reject_review_")) {
@@ -1190,19 +1714,28 @@ public class MessageProcessing {
                 Purchase purchase = purchaseDAO.findById(purchaseId);
                 
                 if (purchase != null) {
-                    // Инициируем процесс отклонения - передаем реального пользователя
-                    User reviewUser = purchase.getUser();
-                    reviewUser.setAdmin(true); // Временно делаем админом для обработки
-                    handleReviewRejection(reviewUser, purchaseId);
+                    // Получаем администратора, который нажал кнопку
+                    Long adminChatId = update.getCallbackQuery().getFrom().getId();
+                    System.out.println("🔍 Admin chat ID: " + adminChatId);
+                    UserDAO userDAO = new UserDAO();
+                    User admin = userDAO.findById(adminChatId);
                     
-                    // Отвечаем на callback query
-                    AnswerCallbackQuery answerCallbackQuery = new AnswerCallbackQuery();
-                    answerCallbackQuery.setCallbackQueryId(update.getCallbackQuery().getId());
-                    answerCallbackQuery.setText("❌ Отзыв отклонен. Укажите причину.");
-                    answerCallbackQuery.setShowAlert(false);
-                    
-                    Sent sent = new Sent();
-                    sent.answerCallbackQuery(answerCallbackQuery);
+                    if (admin != null && admin.isAdmin()) {
+                        System.out.println("✅ Admin found: " + admin.getUsername() + " (ID: " + admin.getIdUser() + ")");
+                        // Инициируем процесс отклонения - передаем администратора
+                        handleReviewRejection(admin, purchaseId);
+                        
+                        // Отвечаем на callback query
+                        AnswerCallbackQuery answerCallbackQuery = new AnswerCallbackQuery();
+                        answerCallbackQuery.setCallbackQueryId(update.getCallbackQuery().getId());
+                        answerCallbackQuery.setText("❌ Отзыв отклонен. Укажите причину.");
+                        answerCallbackQuery.setShowAlert(false);
+                        
+                        Sent sent = new Sent();
+                        sent.answerCallbackQuery(answerCallbackQuery);
+                    } else {
+                        System.err.println("❌ Admin not found or not authorized: " + adminChatId);
+                    }
                 }
             }
             
@@ -1240,9 +1773,15 @@ public class MessageProcessing {
                     
                     // Отправляем уведомление пользователю
                     User reviewUser = purchase.getUser();
+                    String cardInfo = "";
+                    if (purchase.getCardNumber() != null && !purchase.getCardNumber().isEmpty()) {
+                        cardInfo = "💳 Карта: <code>" + purchase.getCardNumber() + "</code>\n";
+                    }
+                    
                     String message = "🎉 Кешбек выплачен!\n\n" +
                             "📦 Товар: " + purchase.getProduct().getProductName() + "\n" +
-                            "💰 Размер кешбека: " + purchase.getProduct().getCashbackPercentage() + "%\n\n" +
+                            "💰 Размер кешбека: " + purchase.getProduct().getCashbackPercentage() + "%\n" +
+                            cardInfo + "\n" +
                             "✅ Кешбек переведен на указанную карту.\n" +
                             "Спасибо за участие в нашей программе! 🙏";
                     
@@ -1633,10 +2172,12 @@ public class MessageProcessing {
      * Начать процесс подачи отзыва
      */
     private void startReviewSubmission(User user, int purchaseId) {
+        System.out.println("🔍 DEBUG: startReviewSubmission called for user " + user.getIdUser() + ", purchaseId " + purchaseId);
         PurchaseDAO purchaseDAO = new PurchaseDAO();
         Purchase purchase = purchaseDAO.findById(purchaseId);
         
         if (purchase == null || purchase.getUser().getIdUser() != user.getIdUser()) {
+            System.out.println("🔍 DEBUG: Purchase not found or user mismatch");
             Sent sent = new Sent();
             sent.sendMessage(user, "❌ Покупка не найдена");
             return;
@@ -1645,7 +2186,16 @@ public class MessageProcessing {
         // Создаем сессию подачи отзыва
         ReviewSubmissionSession session = new ReviewSubmissionSession(purchase);
         RedisSessionStore.setReviewSubmissionSession(user.getIdUser(), session);
-        RedisSessionStore.setState(user.getIdUser(), "REVIEW_SUBMISSION");
+        RedisSessionStore.setState(user.getIdUser(), "REVIEW_SUBMISSION_TEXT");
+        System.out.println("🔍 DEBUG: Session created, state set to REVIEW_SUBMISSION_TEXT, step = " + session.getStep());
+        
+        // Проверяем, что сессия действительно сохранилась
+        ReviewSubmissionSession checkSession = RedisSessionStore.getReviewSubmissionSession(user.getIdUser());
+        if (checkSession != null) {
+            System.out.println("🔍 DEBUG: Session verification successful, step = " + checkSession.getStep());
+        } else {
+            System.out.println("🔍 DEBUG: Session verification FAILED - session lost immediately!");
+        }
         
         // Показываем инструкцию
         showReviewInstructions(user);
@@ -1655,20 +2205,36 @@ public class MessageProcessing {
      * Показать инструкцию для отзыва
      */
     private void showReviewInstructions(User user) {
+        System.out.println("🔍 DEBUG: showReviewInstructions called for user " + user.getIdUser());
         String instructions = "⭐ Инструкция по оставлению отзыва:\n\n" +
                             "Для получения кешбека необходимо:\n\n" +
-                            "📸 Отправить от 3 до 4 фотографий товара:\n" +
-                            "• Фото 1: Общий вид товара\n" +
-                            "• Фото 2: Детали/качество товара\n" +
-                            "• Фото 3: Товар в использовании\n" +
-                            "• Фото 4: Упаковка/этикетка (опционально)\n\n" +
+                            "📸 Отправить 3 фотографии товара\n" +
                             "🎥 Отправить 1 видео:\n" +
                             "• Видео: Демонстрация товара (до 1 минуты)\n\n" +
-                            "📝 Написать отзыв на Wildberries с этими материалами\n\n" +
-                            "Готовы начать? Отправьте первое фото!";
+                            "📝 Написать отзыв на Wildberries с этими материалами\n\n";
+        
+        // Устанавливаем шаг TEXT для начала процесса
+        ReviewSubmissionSession session = RedisSessionStore.getReviewSubmissionSession(user.getIdUser());
+        if (session != null) {
+            System.out.println("🔍 DEBUG: Session found, changing step from " + session.getStep() + " to TEXT");
+            session.setStep(ReviewSubmissionSession.Step.TEXT);
+            RedisSessionStore.setReviewSubmissionSession(user.getIdUser(), session);
+            System.out.println("🔍 DEBUG: Step changed to TEXT, session saved");
+            
+            // Проверяем, что сессия действительно сохранилась
+            ReviewSubmissionSession checkSession = RedisSessionStore.getReviewSubmissionSession(user.getIdUser());
+            if (checkSession != null) {
+                System.out.println("🔍 DEBUG: Session verification successful, step = " + checkSession.getStep());
+            } else {
+                System.out.println("🔍 DEBUG: Session verification FAILED - session lost!");
+            }
+        } else {
+            System.out.println("🔍 DEBUG: Session not found in showReviewInstructions!");
+        }
         
         Sent sent = new Sent();
         sent.sendMessage(user, instructions);
+        System.out.println("🔍 DEBUG: Instructions sent to user");
     }
     
     /**
@@ -1822,6 +2388,15 @@ public class MessageProcessing {
                 RedisSessionStore.setState(user.getIdUser(), "REVIEW_SUBMISSION");
             }
             
+            // Проверяем, есть ли текст в сообщении с медиа
+            if (message.hasText() && (session.getReviewText() == null || session.getReviewText().isEmpty())) {
+                String reviewText = message.getText().trim();
+                if (!reviewText.isEmpty()) {
+                    session.setReviewText(reviewText);
+                    System.out.println("📝 Review text received with media: " + reviewText);
+                }
+            }
+            
             // Определяем тип медиа
             boolean isVideo = message.hasVideo() || 
                         (message.hasDocument() && isVideoDocument(message.getDocument())) ||
@@ -1829,35 +2404,75 @@ public class MessageProcessing {
                         (message.hasAudio() && isVideoAudio(message.getAudio())) ||
                         (message.hasVoice() && isVideoVoice(message.getVoice()));
             
-            if (isVideo && !session.isVideoReceived()) {
-                handleReviewVideo(update, user, session);
-            } else if (message.hasPhoto() && session.getPhotosReceived() < 4) {
+            // Обрабатываем медиа - сначала фото, потом видео
+            boolean mediaProcessed = false;
+            
+            // Если уже есть 3 фото, а пришло ещё фото (без видео) — просим отправить видео
+            if (message.hasPhoto() && session.getPhotosReceived() >= 3 && !session.isVideoReceived()) {
+                Sent sent = new Sent();
+                sent.sendMessage(user, "✅ У вас уже есть 3 фотографии. Теперь отправьте видео демонстрации товара:");
+                return;
+            }
+
+            // Сначала обрабатываем фото
+            if (message.hasPhoto() && session.getPhotosReceived() < 3) {
                 // Проверяем, не является ли это видео, замаскированным под фото
                 if (isLikelyVideoPhoto(message.getPhoto())) {
-                    handleReviewVideo(update, user, session);
-                } else {
-                    handleReviewPhoto(update, user, session);
-                }
-            } else if (session.getPhotosReceived() >= 4 && session.isVideoReceived()) {
-                // Все медиа уже отправлено - завершаем процесс
-                System.out.println("✅ All media already received, completing submission");
-                session.setStep(ReviewSubmissionSession.Step.COMPLETE);
-                RedisSessionStore.setReviewSubmissionSession(user.getIdUser(), session);
-                completeReviewSubmission(user, session);
-            } else {
-                // FALLBACK: Если ничего не подошло, но есть медиа, попробуем обработать как фото
-                if (message.hasPhoto() || message.hasDocument() || message.hasVideo() || 
-                    message.hasVideoNote() || message.hasAudio() || message.hasVoice()) {
-                    if (session.getPhotosReceived() < 4) {
-                        handleReviewPhoto(update, user, session);
-                    } else {
+                    if (!session.isVideoReceived()) {
                         handleReviewVideo(update, user, session);
                     }
                 } else {
-                    Sent sent = new Sent();
-                    sent.sendMessage(user, "❌ Неверный тип медиа. Отправьте фото или видео.");
+                    handleReviewPhoto(update, user, session);
+                }
+                mediaProcessed = true;
+            }
+            
+            // Потом обрабатываем видео
+            if (isVideo && !session.isVideoReceived()) {
+                handleReviewVideo(update, user, session);
+                mediaProcessed = true;
+            }
+            
+            // Если все медиа уже получены, сразу завершаем
+            if (session.getPhotosReceived() >= 3 && session.isVideoReceived() && !session.isCompleted()) {
+                System.out.println("✅ All media received, completing submission immediately");
+                session.setStep(ReviewSubmissionSession.Step.COMPLETE);
+                RedisSessionStore.setReviewSubmissionSession(user.getIdUser(), session);
+                completeReviewSubmission(user, session);
+                return;
+            }
+            
+            // Убираем все промежуточные сообщения - завершение процесса происходит выше
+            // Промежуточные сообщения будут отправляться только при отправке медиа по частям
+            
+            // Если медиа не было обработано, показываем подсказку/обрабатываем по типу
+            if (!mediaProcessed) {
+                if (session.getPhotosReceived() >= 3 && session.isVideoReceived() && !session.isCompleted()) {
+                    // Все уже получено
+                    System.out.println("✅ All media already received, completing submission");
+                    session.setStep(ReviewSubmissionSession.Step.COMPLETE);
+                    RedisSessionStore.setReviewSubmissionSession(user.getIdUser(), session);
+                    completeReviewSubmission(user, session);
+                } else {
+                    // FALLBACK: Четко разделяем фото/видео
+                    if (message.hasPhoto()) {
+                        if (session.getPhotosReceived() < 3) {
+                            handleReviewPhoto(update, user, session);
+                        } else {
+                            Sent sent = new Sent();
+                            sent.sendMessage(user, "✅ У вас уже есть 3 фотографии. Теперь отправьте видео демонстрации товара:");
+                        }
+                    } else if (message.hasVideo() || message.hasDocument() || message.hasVideoNote() || message.hasAudio() || message.hasVoice()) {
+                        handleReviewVideo(update, user, session);
+                    } else {
+                        Sent sent = new Sent();
+                        sent.sendMessage(user, "❌ Неверный тип медиа. Отправьте фото или видео.");
+                    }
                 }
             }
+            
+            // Убираем все промежуточные сообщения - система молча обрабатывает медиа
+            // Пользователь отправляет медиа, система завершает процесс когда все получено
         } catch (Exception e) {
             System.err.println("Ошибка при обработке медиа отзыва: " + e.getMessage());
             e.printStackTrace();
@@ -1868,18 +2483,18 @@ public class MessageProcessing {
      * Обработать фотографию для отзыва
      */
     private void handleReviewPhoto(Update update, User user, ReviewSubmissionSession session) {
-        if (session.getPhotosReceived() >= 4) {
-            // Уже отправлено 4 фото - проверяем, есть ли видео
-            if (session.isVideoReceived()) {
+        if (session.getPhotosReceived() >= 3) {
+            // Уже отправлено 3 фото - проверяем, есть ли видео
+            if (session.isVideoReceived() && !session.isCompleted()) {
                 // Все медиа есть - завершаем процесс
                 System.out.println("✅ All media already received in handleReviewPhoto, completing submission");
                 session.setStep(ReviewSubmissionSession.Step.COMPLETE);
                 RedisSessionStore.setReviewSubmissionSession(user.getIdUser(), session);
                 completeReviewSubmission(user, session);
-            } else {
+            } else if (!session.isCompleted()) {
                 // Нужно отправить видео
                 Sent sent = new Sent();
-                sent.sendMessage(user, "✅ У вас уже есть 4 фотографии. Теперь отправьте видео демонстрации товара:");
+                sent.sendMessage(user, "✅ У вас уже есть 3 фотографии. Теперь отправьте видео демонстрации товара:");
             }
             return;
         }
@@ -1895,24 +2510,14 @@ public class MessageProcessing {
         RedisSessionStore.setReviewSubmissionSession(user.getIdUser(), session);
         
         // Проверяем, можно ли завершить процесс
-        if (session.getPhotosReceived() >= 4 && session.isVideoReceived()) {
+        if (session.getPhotosReceived() >= 3 && session.isVideoReceived() && !session.isCompleted()) {
             session.setStep(ReviewSubmissionSession.Step.COMPLETE);
             RedisSessionStore.setReviewSubmissionSession(user.getIdUser(), session);
             completeReviewSubmission(user, session);
             return;
         }
         
-        // Отправляем сообщение о прогрессе только если процесс не завершен
-        int remaining = 4 - session.getPhotosReceived();
-        if (remaining > 0) {
-            Sent sent = new Sent();
-            sent.sendMessage(user, "✅ Фото " + session.getPhotosReceived() + "/4 получено!\n\n📸 Отправьте еще " + remaining + " фотографий или видео:");
-        } else if (!session.isVideoReceived()) {
-            Sent sent = new Sent();
-            sent.sendMessage(user, "✅ Все 4 фотографии получены!\n\n🎥 Теперь отправьте видео демонстрации товара:");
-            session.setStep(ReviewSubmissionSession.Step.MEDIA);
-            RedisSessionStore.setReviewSubmissionSession(user.getIdUser(), session);
-        }
+        // Убираем промежуточные сообщения - завершение процесса происходит в handleReviewMedia
     }
     
     /**
@@ -1921,17 +2526,15 @@ public class MessageProcessing {
     private void handleReviewVideo(Update update, User user, ReviewSubmissionSession session) {
         if (session.isVideoReceived()) {
             // Видео уже отправлено - проверяем, есть ли все фото
-            if (session.getPhotosReceived() >= 4) {
+            if (session.getPhotosReceived() >= 3 && !session.isCompleted()) {
                 // Все медиа есть - завершаем процесс
                 System.out.println("✅ All media already received in handleReviewVideo, completing submission");
                 session.setStep(ReviewSubmissionSession.Step.COMPLETE);
                 RedisSessionStore.setReviewSubmissionSession(user.getIdUser(), session);
                 completeReviewSubmission(user, session);
-            } else {
-                // Нужно отправить еще фото
-                int remaining = 4 - session.getPhotosReceived();
-                Sent sent = new Sent();
-                sent.sendMessage(user, "✅ Видео уже отправлено. Отправьте еще " + remaining + " фотографий товара:");
+            } else if (!session.isCompleted()) {
+                // Убираем промежуточное сообщение - система молча обрабатывает медиа
+                // Пользователь отправляет медиа, система завершает процесс когда все получено
             }
             return;
         }
@@ -1977,17 +2580,13 @@ public class MessageProcessing {
         RedisSessionStore.setReviewSubmissionSession(user.getIdUser(), session);
         
         // Проверяем, готов ли процесс к завершению
-        if (session.getPhotosReceived() >= 4 && session.isVideoReceived()) {
+        if (session.getPhotosReceived() >= 3 && session.isVideoReceived() && !session.isCompleted()) {
             session.setStep(ReviewSubmissionSession.Step.COMPLETE);
             RedisSessionStore.setReviewSubmissionSession(user.getIdUser(), session);
             completeReviewSubmission(user, session);
-        } else {
-            int remainingPhotos = 4 - session.getPhotosReceived();
-            if (remainingPhotos > 0) {
-                Sent sent = new Sent();
-                sent.sendMessage(user, "✅ Видео получено! Теперь отправьте еще " + remainingPhotos + " фотографий товара:");
-            }
         }
+        
+        // Убираем промежуточные сообщения - завершение процесса происходит в handleReviewMedia
     }
     
     /**
@@ -1998,23 +2597,19 @@ public class MessageProcessing {
         System.out.println("✅ User: " + user.getUsername() + " (ID: " + user.getIdUser() + ")");
         System.out.println("✅ Photos received: " + session.getPhotosReceived());
         System.out.println("✅ Video received: " + session.isVideoReceived());
+        System.out.println("✅ Is completed: " + session.isCompleted());
         
-        // Проверяем количество медиа
-        if (session.getPhotosReceived() != 4) {
-            System.out.println("❌ Invalid photo count: " + session.getPhotosReceived());
-            int remaining = 4 - session.getPhotosReceived();
-            Sent sent = new Sent();
-            sent.sendMessage(user, "📸 Отправьте еще " + remaining + " фотографий товара:");
+        // Проверяем, не завершен ли уже процесс
+        if (session.isCompleted()) {
+            System.out.println("⚠️ Review submission already completed, skipping...");
             return;
         }
         
-        if (!session.isVideoReceived()) {
-            System.out.println("❌ No video received");
-            Sent sent = new Sent();
-            sent.sendMessage(user, "🎥 Теперь отправьте видео демонстрации товара:");
-            return;
-        }
+        // Устанавливаем флаг завершения
+        session.setCompleted(true);
+        RedisSessionStore.setReviewSubmissionSession(user.getIdUser(), session);
         
+        // Проверки медиа уже выполнены в handleReviewMedia, здесь просто завершаем процесс
         System.out.println("✅ All media validation passed");
         
         // Обновляем статус покупки
@@ -2054,11 +2649,7 @@ public class MessageProcessing {
      */
     private void sendReviewMediaToGroup(User user, ReviewSubmissionSession session) {
         try {
-            ResourceBundle rb = ResourceBundle.getBundle("app");
-            long groupID = Long.parseLong(rb.getString("tg.group"));
-            
-            // Отправляем в общую группу
-            
+            // оставлено на будущее при необходимости локализации/настроек
             String text = "⭐ Пользователь @" + user.getUsername() + " оставил отзыв!\n\n" +
                         "📦 Товар: " + session.getPurchase().getProduct().getProductName() + "\n" +
                         "📸 Фотографий: " + session.getPhotosReceived() + "\n" +
@@ -2084,43 +2675,25 @@ public class MessageProcessing {
             
             Sent sent = new Sent();
             
-            // Получаем ID подгруппы пользователя
-            int userSubgroupId = user.getId_message();
+            // Отправляем медиа отзыва используя file_id (без скачивания)
+            Long reviewMessageId = sent.sendReviewMediaToGroup(
+                user,
+                session.getPhotoFileIds(),
+                session.getPhotoMessageIds(),
+                session.getVideoFileId(),
+                session.getVideoMessageId(),
+                text,
+                markup
+            );
             
-            // Скачиваем и отправляем фотографии в группу
-            String[] photoFileIds = session.getPhotoFileIds();
-            
-            for (int i = 0; i < session.getPhotosReceived(); i++) {
-                if (photoFileIds[i] != null) {
-                    // Скачиваем фото асинхронно и отправляем в подгруппу пользователя
-                    AsyncService.processReviewPhotoAsync(photoFileIds[i], user.getIdUser(), i + 1)
-                        .thenAccept(filePath -> {
-                            if (filePath != null) {
-                                sent.sendPhotoToGroupFromFile(groupID, filePath, userSubgroupId);
-                            }
-                        });
-                }
-            }
-            
-            // Скачиваем и отправляем видео в подгруппу пользователя
-            if (session.getVideoFileId() != null) {
-                // Скачиваем видео асинхронно и отправляем в подгруппу пользователя
-                AsyncService.processReviewVideoAsync(session.getVideoFileId(), user.getIdUser())
-                    .thenAccept(filePath -> {
-                        if (filePath != null) {
-                            sent.sendVideoToGroupFromFile(groupID, filePath, userSubgroupId);
-                        }
-                    });
-            }
-            
-            // В конце отправляем текст с кнопками в подгруппу пользователя
-            org.telegram.telegrambots.meta.api.objects.Message sentMessage = sent.sendMessageToGroupWithMarkup(groupID, text, markup, userSubgroupId);
-            
-            // Сохраняем ID сообщения в группе
-            if (sentMessage != null) {
-                session.getPurchase().setReviewMessageId((long) sentMessage.getMessageId());
+            // Сохраняем реальный ID сообщения в группе
+            if (reviewMessageId != null) {
+                session.getPurchase().setReviewMessageId(reviewMessageId);
                 PurchaseDAO purchaseDAO = new PurchaseDAO();
                 purchaseDAO.update(session.getPurchase());
+                System.out.println("✅ Review message ID saved: " + reviewMessageId);
+            } else {
+                System.err.println("❌ Failed to get review message ID");
             }
             
         } catch (Exception e) {
@@ -2152,13 +2725,26 @@ public class MessageProcessing {
         
         PhotoSize photo = message.getPhoto().get(message.getPhoto().size() - 1);
         String fileId = photo.getFileId();
+        Integer messageId = message.getMessageId();
         
         // Отправляем пользователю сообщение о начале обработки
         createTelegramBot.sendMessage(user, "🔄 Обрабатываю скриншот отзыва, пожалуйста подождите...");
         
-        // Асинхронная обработка скриншота отзыва
+        // Сохраняем file_id и message_id в сессии (если есть активная сессия)
+        CashbackSession cashbackSession = RedisSessionStore.getCashbackSession(chatId);
+        if (cashbackSession != null) {
+            cashbackSession.setScreenshotFileId(fileId);
+            cashbackSession.setScreenshotMessageId(messageId);
+            RedisSessionStore.setCashbackSession(chatId, cashbackSession);
+        }
+        
+        // Асинхронная обработка скриншота отзыва (без скачивания)
         AsyncService.processCashbackScreenshotAsync(purchase, user, photo, fileId)
             .thenAccept(filePath -> {
+                // Используем результат для подавления варнинга о неиспользуемой переменной
+                if (filePath == null) {
+                    // no-op
+                }
                 // Успешная обработка
                 String finishText = "✅ Скриншот отзыва принят!\n\n" +
                         "📦 Товар: " + purchase.getProduct().getProductName() + "\n" +
@@ -2175,11 +2761,8 @@ public class MessageProcessing {
                 purchase.setPurchaseStage(3);
                 purchaseDAO.update(purchase);
                 
-                // Уведомление в группу
+                // Уведомление в группу с пересылкой скриншота
                 try {
-                    ResourceBundle rb = ResourceBundle.getBundle("app");
-                    long groupID = Long.parseLong(rb.getString("tg.group"));
-                    
                     String text = "💸 Пользователь @" + user.getUsername() + " запросил кешбек!\n\n" +
                             "📦 Товар: " + purchase.getProduct().getProductName() + "\n" +
                             "💰 Размер кешбека: " + purchase.getProduct().getCashbackPercentage() + "%\n" +
@@ -2198,24 +2781,22 @@ public class MessageProcessing {
                     InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
                     markup.setKeyboard(rows);
                     
-                    org.telegram.telegrambots.meta.api.objects.Message sentMessage = createTelegramBot.sendMessageToGroupWithMarkup(groupID, text, markup);
+                    // Отправляем скриншот кешбека в группу используя file_id
+                    Long cashbackMessageId = createTelegramBot.sendCashbackScreenshotToGroup(
+                        user,
+                        fileId,
+                        messageId,
+                        text,
+                        markup
+                    );
                     
-                    // Сохраняем ID сообщения о кешбеке в базе данных
-                    if (sentMessage != null) {
-                        purchase.setCashbackMessageId((long) sentMessage.getMessageId());
+                    // Сохраняем реальный ID сообщения о кешбеке в базе данных
+                    if (cashbackMessageId != null) {
+                        purchase.setCashbackMessageId(cashbackMessageId);
                         purchaseDAO.update(purchase);
-                    }
-                    
-                    // Отправляем фото из скачанного файла
-                    if (filePath != null) {
-                        java.io.File photoFile = new java.io.File(filePath);
-                        if (photoFile.exists()) {
-                            createTelegramBot.sendPhotoToGroupFromFile(groupID, filePath);
-                        } else {
-                            System.err.println("❌ Cashback photo file not found: " + filePath);
-                        }
+                        System.out.println("✅ Cashback message ID saved: " + cashbackMessageId);
                     } else {
-                        System.err.println("❌ Cashback screenshot processing failed - no file path returned");
+                        System.err.println("❌ Failed to get cashback message ID");
                     }
                     
                 } catch (Exception e) {
@@ -2271,14 +2852,18 @@ public class MessageProcessing {
                 "📦 Товар: " + purchase.getProduct().getProductName() + "\n" +
                 "💰 Размер кешбека: " + purchase.getProduct().getCashbackPercentage() + "%\n\n" +
                 "Для получения кешбека:\n" +
-                "1️⃣ Убедитесь, что ваш отзыв опубликован на Wildberries\n" +
+                "1️⃣ Введите номер карты для получения кешбека\n" +
                 "2️⃣ Отправьте скриншот вашего опубликованного отзыва\n" +
                 "3️⃣ Дождитесь одобрения администратором\n" +
                 "4️⃣ Получите кешбек на указанную карту\n\n" +
-                "📸 Отправьте скриншот отзыва:";
+                "💳 Введите номер карты (16 цифр):";
         
-        // Устанавливаем состояние для получения кешбека
-        RedisSessionStore.setState(user.getIdUser(), "CASHBACK_REQUEST_" + purchaseId);
+        // Создаем сессию кешбека
+        CashbackSession cashbackSession = new CashbackSession(purchase);
+        RedisSessionStore.setCashbackSession(user.getIdUser(), cashbackSession);
+        
+        // Устанавливаем состояние для ввода номера карты
+        RedisSessionStore.setState(user.getIdUser(), "CASHBACK_CARD_INPUT_" + purchaseId);
         
         Sent sent = new Sent();
         sent.sendMessage(user, instruction);
@@ -2314,7 +2899,10 @@ public class MessageProcessing {
         System.out.println("📝 State set to: REVIEW_SUBMISSION");
         
         // Отправляем сообщение с просьбой написать текст отзыва
-        String message = "Вы оставляли заявку на товар: \"" + purchase.getProduct().getProductName() + "\"\n" +
+        String productName = (purchase.getProduct() != null && purchase.getProduct().getProductName() != null) 
+            ? purchase.getProduct().getProductName() 
+            : "Неизвестный товар";
+        String message = "📝 Вы оставляли заявку на товар: \"" + productName + "\"\n\n" +
                         "Пожалуйста, напишите текст вашего отзыва о товаре 🖊";
         
         Sent sent = new Sent();
@@ -2325,17 +2913,21 @@ public class MessageProcessing {
      * Обработать отправку текста отзыва
      */
     private void handleReviewTextSubmission(Update update, User user) {
+        System.out.println("🔍 DEBUG: handleReviewTextSubmission called for user " + user.getIdUser());
         ReviewSubmissionSession session = RedisSessionStore.getReviewSubmissionSession(user.getIdUser());
         
         if (session == null) {
+            System.out.println("🔍 DEBUG: session is null");
             Sent sent = new Sent();
             sent.sendMessage(user, "❌ Сессия отзыва не найдена. Начните заново.");
             return;
         }
         
         String reviewText = update.getMessage().getText();
+        System.out.println("🔍 DEBUG: reviewText = " + reviewText);
         
         if (reviewText == null || reviewText.trim().isEmpty()) {
+            System.out.println("🔍 DEBUG: reviewText is empty");
             Sent sent = new Sent();
             sent.sendMessage(user, "❌ Пожалуйста, введите текст отзыва.");
             return;
@@ -2345,12 +2937,15 @@ public class MessageProcessing {
         session.setReviewText(reviewText.trim());
         session.setStep(ReviewSubmissionSession.Step.MEDIA);
         RedisSessionStore.setReviewSubmissionSession(user.getIdUser(), session);
+        System.out.println("🔍 DEBUG: Text saved, step changed to MEDIA");
         
         // Отправляем сообщение с просьбой прикрепить медиа
-        String message = "Отлично! Теперь, пожалуйста, прикрепите фотографии и/или видео товара (4 фото и 1 видео) 📷";
+        String message = "Отлично! Теперь, пожалуйста, прикрепите фотографии и/или видео товара (3 фото и 1 видео) 📷\n\n" +
+                "💡 Совет: Вы можете отправить текст и медиа в одном сообщении!";
         
         Sent sent = new Sent();
         sent.sendMessage(user, message);
+        System.out.println("🔍 DEBUG: Media request message sent");
     }
     
     /**
@@ -2402,47 +2997,80 @@ public class MessageProcessing {
             return;
         }
         
+        // Получаем ID подгруппы пользователя
+        int userSubgroupId = purchase.getUser().getId_message();
+        System.out.println("🔍 DEBUG: Creating rejection session for userSubgroupId = " + userSubgroupId);
+        
         // Создаем сессию для ввода причины отказа
         ReviewRejectionSession rejectionSession = new ReviewRejectionSession(purchase);
-        RedisSessionStore.setReviewRejectionSession(admin.getIdUser(), rejectionSession);
-        RedisSessionStore.setState(admin.getIdUser(), "REVIEW_REJECTION");
+        // Сохраняем сессию для подгруппы пользователя, чтобы администратор мог отвечать в группе
+        RedisSessionStore.setReviewRejectionSession((long) userSubgroupId, rejectionSession);
+        RedisSessionStore.setState((long) userSubgroupId, "REVIEW_REJECTION");
+        System.out.println("🔍 DEBUG: Session created and state set for userSubgroupId = " + userSubgroupId);
         
-        // Отправляем сообщение админу с запросом причины
-        String message = "❌ Отклонение отзыва\n\n" +
-                "Пользователь: @" + purchase.getUser().getUsername() + "\n" +
-                "Товар: " + purchase.getProduct().getProductName() + "\n\n" +
-                "📝 Пожалуйста, укажите причину отказа:";
-        
-        Sent sent = new Sent();
-        sent.sendMessage(admin, message);
+        // Отправляем сообщение в группу с запросом причины
+        try {
+            ResourceBundle rb = ResourceBundle.getBundle("app");
+            long groupID = Long.parseLong(rb.getString("tg.group"));
+            
+            String message = "❌ Отклонение отзыва\n\n" +
+                    "Пользователь: @" + purchase.getUser().getUsername() + "\n" +
+                    "Товар: " + purchase.getProduct().getProductName() + "\n\n" +
+                    "📝 Пожалуйста, укажите причину отказа:";
+            
+            Sent sent = new Sent();
+            sent.sendMessageUser(groupID, userSubgroupId, message);
+            
+            System.out.println("✅ Rejection reason request sent to group " + groupID + ", subgroup " + userSubgroupId);
+        } catch (Exception e) {
+            System.err.println("❌ Error sending rejection reason request to group: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
     
     /**
      * Обработка ввода причины отказа отзыва
      */
-    private void handleReviewRejectionReason(Update update, User admin) {
-        System.out.println("🔍 Handling review rejection reason input");
+    private void handleReviewRejectionReason(Update update, User userInThread) {
+        System.out.println("🔍 DEBUG: handleReviewRejectionReason called for user " + userInThread.getIdUser());
         
         String reason = update.getMessage().getText();
-        ReviewRejectionSession rejectionSession = RedisSessionStore.getReviewRejectionSession(admin.getIdUser());
+        System.out.println("🔍 DEBUG: Rejection reason: " + reason);
         
-        if (rejectionSession == null) {
-            System.out.println("❌ Rejection session not found");
-            Sent sent = new Sent();
-            sent.sendMessage(admin, "❌ Сессия отклонения не найдена. Попробуйте еще раз.");
+        // Получаем администратора, который отправил сообщение
+        Long adminChatId = update.getMessage().getFrom().getId();
+        UserDAO userDAO = new UserDAO();
+        User admin = userDAO.findById(adminChatId);
+        
+        if (admin == null || !admin.isAdmin()) {
+            System.out.println("❌ Message from non-admin user: " + adminChatId);
             return;
         }
         
+        // Получаем ID подгруппы (threadID) из сообщения
+        Integer threadID = update.getMessage().getMessageThreadId();
+        System.out.println("🔍 DEBUG: Looking for rejection session with threadID = " + threadID);
+        
+        // Ищем сессию отклонения по ID подгруппы (threadID)
+        ReviewRejectionSession rejectionSession = RedisSessionStore.getReviewRejectionSession((long) threadID);
+        
+        if (rejectionSession == null) {
+            System.out.println("❌ Rejection session not found for threadID: " + threadID);
+            return;
+        }
+        
+        System.out.println("✅ Admin " + admin.getUsername() + " provided rejection reason: " + reason);
+        
         // Сохраняем причину отказа
         rejectionSession.setRejectionReason(reason);
-        RedisSessionStore.setReviewRejectionSession(admin.getIdUser(), rejectionSession);
+        RedisSessionStore.setReviewRejectionSession((long) threadID, rejectionSession);
         
         // Обрабатываем отклонение
         processReviewRejection(admin, rejectionSession);
         
         // Очищаем сессию
-        RedisSessionStore.removeReviewRejectionSession(admin.getIdUser());
-        RedisSessionStore.removeState(admin.getIdUser());
+        RedisSessionStore.removeReviewRejectionSession((long) threadID);
+        RedisSessionStore.removeState((long) threadID);
     }
     
     /**
@@ -2468,8 +3096,222 @@ public class MessageProcessing {
         Sent sent = new Sent();
         sent.sendMessage(reviewUser, userMessage);
         
-        // Уведомляем администратора
-        String adminMessage = "✅ Отзыв пользователя @" + reviewUser.getUsername() + " отклонен с причиной:\n" + reason;
-        sent.sendMessage(admin, adminMessage);
+        // Отправляем подтверждение в группу в ту же подгруппу пользователя
+        try {
+            ResourceBundle rb = ResourceBundle.getBundle("app");
+            long groupID = Long.parseLong(rb.getString("tg.group"));
+            
+            // Получаем ID подгруппы пользователя
+            int userSubgroupId = reviewUser.getId_message();
+            
+            String groupMessage = "✅ Отзыв пользователя @" + reviewUser.getUsername() + " отклонен с причиной:\n" + reason;
+            sent.sendMessageUser(groupID, userSubgroupId, groupMessage);
+            
+            System.out.println("✅ Rejection confirmation sent to group " + groupID + ", subgroup " + userSubgroupId);
+        } catch (Exception e) {
+            System.err.println("❌ Error sending rejection confirmation to group: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * Обработка ввода номера карты для кешбека
+     */
+    private void handleCashbackCardInput(Update update, User user, int purchaseId) {
+        Sent createTelegramBot = new Sent();
+        long chatId = update.getMessage().getChatId();
+        String cardNumber = update.getMessage().getText();
+        
+        // Убираем пробелы из номера карты
+        if (cardNumber != null) {
+            cardNumber = cardNumber.replaceAll("\\s+", "");
+        }
+        
+        // Проверяем формат номера карты (16 цифр)
+        if (cardNumber == null || !cardNumber.matches("\\d{16}")) {
+            createTelegramBot.sendMessage(user, "❌ Неверный формат номера карты!\n\n" +
+                    "Пожалуйста, введите номер карты из 16 цифр (например: 1234567890123456 или 1234 5678 9012 3456)");
+            return;
+        }
+        
+        // Получаем сессию кешбека
+        CashbackSession cashbackSession = RedisSessionStore.getCashbackSession(chatId);
+        if (cashbackSession == null) {
+            createTelegramBot.sendMessage(user, "❌ Сессия кешбека не найдена. Попробуйте начать процесс заново.");
+            RedisSessionStore.removeState(chatId);
+            return;
+        }
+        
+        // Проверяем, что это правильная покупка
+        if (cashbackSession.getPurchase().getIdPurchase() != purchaseId) {
+            createTelegramBot.sendMessage(user, "❌ Ошибка сессии. Попробуйте начать процесс заново.");
+            RedisSessionStore.removeState(chatId);
+            RedisSessionStore.removeCashbackSession(chatId);
+            return;
+        }
+        
+        // Сохраняем номер карты в сессии
+        cashbackSession.setCardNumber(cardNumber);
+        cashbackSession.setStep(CashbackSession.Step.SCREENSHOT);
+        RedisSessionStore.setCashbackSession(chatId, cashbackSession);
+        
+        // Обновляем состояние для отправки скриншота
+        RedisSessionStore.setState(chatId, "CASHBACK_SCREENSHOT_" + purchaseId);
+        
+        // Отправляем сообщение с инструкцией по скриншоту
+        String instruction = "✅ Номер карты принят!\n\n" +
+                "📦 Товар: " + cashbackSession.getPurchase().getProduct().getProductName() + "\n" +
+                "💰 Размер кешбека: " + cashbackSession.getPurchase().getProduct().getCashbackPercentage() + "%\n" +
+                "💳 Карта: <code>" + cardNumber + "</code>\n\n" +
+                "📸 Теперь отправьте скриншот вашего опубликованного отзыва:";
+        
+        createTelegramBot.sendMessage(user, instruction);
+    }
+    
+    /**
+     * Обработка скриншота кешбека с номером карты
+     */
+    private void handleCashbackScreenshotWithCard(Update update, User user, int purchaseId) {
+        Sent createTelegramBot = new Sent();
+        long chatId = update.getMessage().getChatId();
+        Message message = update.getMessage();
+        
+        if (message.getPhoto() == null || message.getPhoto().isEmpty()) {
+            createTelegramBot.sendMessage(user, "Пожалуйста, приложите скриншот вашего отзыва картинкой.");
+            return;
+        }
+        
+        // Получаем сессию кешбека
+        CashbackSession cashbackSession = RedisSessionStore.getCashbackSession(chatId);
+        if (cashbackSession == null) {
+            createTelegramBot.sendMessage(user, "❌ Сессия кешбека не найдена. Попробуйте начать процесс заново.");
+            RedisSessionStore.removeState(chatId);
+            return;
+        }
+        
+        Purchase purchase = cashbackSession.getPurchase();
+        if (purchase.getIdPurchase() != purchaseId) {
+            createTelegramBot.sendMessage(user, "❌ Ошибка сессии. Попробуйте начать процесс заново.");
+            RedisSessionStore.removeState(chatId);
+            RedisSessionStore.removeCashbackSession(chatId);
+            return;
+        }
+        
+        PhotoSize photo = message.getPhoto().get(message.getPhoto().size() - 1);
+        String fileId = photo.getFileId();
+        Integer messageId = message.getMessageId();
+        
+        // Отправляем пользователю сообщение о начале обработки
+        createTelegramBot.sendMessage(user, "🔄 Обрабатываю скриншот отзыва, пожалуйста подождите...");
+        
+        // Сохраняем file_id и message_id в сессии
+        cashbackSession.setScreenshotFileId(fileId);
+        cashbackSession.setScreenshotMessageId(messageId);
+        RedisSessionStore.setCashbackSession(chatId, cashbackSession);
+        
+        // Сохраняем номер карты в покупке
+        PurchaseDAO purchaseDAO = new PurchaseDAO();
+        purchase.setCardNumber(cashbackSession.getCardNumber());
+        purchaseDAO.update(purchase);
+        
+        // Асинхронная обработка скриншота отзыва (без скачивания)
+        AsyncService.processCashbackScreenshotAsync(purchase, user, photo, fileId)
+            .thenAccept(filePath -> {
+                // Используем результат для подавления варнинга о неиспользуемой переменной
+                if (filePath == null) {
+                    // no-op
+                }
+                // Успешная обработка
+                String finishText = "✅ Скриншот отзыва принят!\n\n" +
+                        "📦 Товар: " + purchase.getProduct().getProductName() + "\n" +
+                        "💰 Кешбек: " + purchase.getProduct().getCashbackPercentage() + "%\n" +
+                        "💳 Карта: <code>" + cashbackSession.getCardNumber() + "</code>\n\n" +
+                        "Ваш запрос на кешбек отправлен администратору на рассмотрение.\n" +
+                        "После одобрения кешбек будет переведен на указанную карту.\n\n" +
+                        "Спасибо за участие! 🎉";
+                
+                LogicUI logicUI = new LogicUI();
+                logicUI.sendMenu(user, finishText);
+                RedisSessionStore.removeState(chatId);
+                RedisSessionStore.removeCashbackSession(chatId);
+                
+                // Обновляем статус покупки на этап получения кешбека
+                purchase.setPurchaseStage(3);
+                purchaseDAO.update(purchase);
+                
+                // Уведомление в группу с пересылкой скриншота
+                try {
+                    String text = "💸 Пользователь @" + user.getUsername() + " запросил кешбек!\n\n" +
+                            "📦 Товар: " + purchase.getProduct().getProductName() + "\n" +
+                            "💰 Размер кешбека: " + purchase.getProduct().getCashbackPercentage() + "%\n" +
+                            "💳 Карта: <code>" + cashbackSession.getCardNumber() + "</code>\n" +
+                            "📅 Дата покупки: " + purchase.getDate() + "\n\n" +
+                            "📸 Скриншот отзыва прикреплен ниже";
+
+                    // Создаем кнопку "Оплачено"
+                    List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+                    
+                    InlineKeyboardButton paidButton = new InlineKeyboardButton();
+                    paidButton.setText("✅ Оплачено");
+                    paidButton.setCallbackData("cashback_paid_" + purchase.getIdPurchase());
+                    
+                    rows.add(List.of(paidButton));
+                    
+                    InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+                    markup.setKeyboard(rows);
+                    
+                    // Отправляем скриншот кешбека в группу используя file_id
+                    Long cashbackMessageId = createTelegramBot.sendCashbackScreenshotToGroup(
+                        user,
+                        fileId,
+                        messageId,
+                        text,
+                        markup
+                    );
+                    
+                    // Сохраняем реальный ID сообщения о кешбеке в базе данных
+                    if (cashbackMessageId != null) {
+                        purchase.setCashbackMessageId(cashbackMessageId);
+                        purchaseDAO.update(purchase);
+                        System.out.println("✅ Cashback message ID saved: " + cashbackMessageId);
+                    } else {
+                        System.err.println("❌ Failed to get cashback message ID");
+                    }
+                    
+                } catch (Exception e) {
+                    System.err.println("Ошибка при отправке уведомления в группу: " + e.getMessage());
+                }
+            })
+            .exceptionally(throwable -> {
+                System.err.println("❌ Cashback screenshot processing error: " + throwable.getMessage());
+                createTelegramBot.sendMessage(user, "❌ Не удалось обработать скриншот отзыва. Попробуйте ещё раз.");
+                return null;
+            });
+    }
+
+    /**
+     * Обработка ввода username для блокировки пользователя
+     */
+    private void handleBlockUserInput(Update update, User admin) {
+        String username = update.getMessage().getText();
+        if (username == null) {
+            Sent sent = new Sent();
+            sent.sendMessage(admin, "❌ Введите корректный username пользователя без @");
+            return;
+        }
+        username = username.trim();
+        if (username.startsWith("@")) {
+            username = username.substring(1);
+        }
+        if (username.isEmpty()) {
+            Sent sent = new Sent();
+            sent.sendMessage(admin, "❌ Username не может быть пустым. Попробуйте еще раз:");
+            return;
+        }
+
+        // Сбрасываем состояние и выполняем блокировку
+        RedisSessionStore.removeState(admin.getIdUser());
+        LogicUI logicUI = new LogicUI();
+        logicUI.blockUser(admin, username);
     }
 }

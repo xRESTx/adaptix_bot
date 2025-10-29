@@ -122,8 +122,17 @@ public class RedisManager {
      * Сохранение сессии в Redis с TTL
      */
     public void setSession(String key, String value) {
-        try (Jedis jedis = getResource()) {
-            jedis.setex(key, SESSION_TTL_SECONDS, value);
+        try {
+            JedisPool pool = getJedisPool();
+            if (pool == null) {
+                // Redis недоступен, используем fallback к памяти
+                return;
+            }
+            try (Jedis jedis = pool.getResource()) {
+                jedis.setex(key, SESSION_TTL_SECONDS, value);
+            }
+        } catch (Exception e) {
+            System.err.println("❌ Error saving session to Redis: " + e.getMessage());
         }
     }
     
@@ -131,8 +140,18 @@ public class RedisManager {
      * Получение сессии из Redis
      */
     public String getSession(String key) {
-        try (Jedis jedis = getResource()) {
-            return jedis.get(key);
+        try {
+            JedisPool pool = getJedisPool();
+            if (pool == null) {
+                // Redis недоступен, используем fallback к памяти
+                return null;
+            }
+            try (Jedis jedis = pool.getResource()) {
+                return jedis.get(key);
+            }
+        } catch (Exception e) {
+            System.err.println("❌ Error getting session from Redis: " + e.getMessage());
+            return null;
         }
     }
     
@@ -140,8 +159,17 @@ public class RedisManager {
      * Удаление сессии из Redis
      */
     public void deleteSession(String key) {
-        try (Jedis jedis = getResource()) {
-            jedis.del(key);
+        try {
+            JedisPool pool = getJedisPool();
+            if (pool == null) {
+                // Redis недоступен, используем fallback к памяти
+                return;
+            }
+            try (Jedis jedis = pool.getResource()) {
+                jedis.del(key);
+            }
+        } catch (Exception e) {
+            System.err.println("❌ Error deleting session from Redis: " + e.getMessage());
         }
     }
     
