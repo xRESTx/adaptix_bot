@@ -1,5 +1,8 @@
 package org.example.settings;
 
+import org.example.dao.TechnicalSupportDAO;
+import org.example.table.TechnicalSupport;
+
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 
@@ -11,8 +14,10 @@ public class AdminSettings {
     private final Map<String, String> settings = new ConcurrentHashMap<>();
     
     private AdminSettings() {
-        // Устанавливаем значения по умолчанию
-        settings.put("support_mention", "@test");
+        TechnicalSupportDAO technicalSupportDAO = new TechnicalSupportDAO();
+        TechnicalSupport technicalSupport = technicalSupportDAO.findByKey("support_mention");
+
+        settings.put("support_mention", technicalSupport.getUsername());
     }
     
     public static AdminSettings getInstance() {
@@ -30,6 +35,12 @@ public class AdminSettings {
      * Установить значение настройки
      */
     public void setSetting(String key, String value) {
+        TechnicalSupportDAO technicalSupportDAO = new TechnicalSupportDAO();
+        TechnicalSupport technicalSupport = technicalSupportDAO.findByKey("support_mention");
+
+        technicalSupport.setUsername(value);
+        technicalSupportDAO.update(technicalSupport);
+
         settings.put(key, value);
         System.out.println("🔧 Admin setting updated: " + key + " = " + value);
     }

@@ -10,7 +10,8 @@ import org.hibernate.Transaction;
 
 import java.util.List;
 
-public class PurchaseDAO {
+public class
+PurchaseDAO {
 
     private final SessionFactory sessionFactory;
 

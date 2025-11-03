@@ -42,5 +42,6 @@
         <mapping class="org.example.table.Product"/>
         <mapping class="org.example.table.Purchase"/>
         <mapping class="org.example.table.User"/>
+        <mapping class="org.example.table.TechnicalSupport"/>
     </session-factory>
 </hibernate-configuration>
