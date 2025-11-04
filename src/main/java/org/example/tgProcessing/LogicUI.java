@@ -71,9 +71,7 @@ public class LogicUI {
             user.setBlock(false);
             user.setUserFlag(true);
             user.setUsername(update.getMessage().getFrom().getUserName());
-            List<Long> messageIdAndGroup = telegramBot.createTopic(update);
-            user.setId_message(Math.toIntExact(messageIdAndGroup.getLast()));
-
+            user.setId_message(0);
             sent.sendMessageStart(user, user.getUsername() + ", Вас приветствует AdaptixBot", sendMessage);
             userDAO.save(user);
         }else{

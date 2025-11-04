@@ -877,6 +877,14 @@ public class MessageProcessing {
                 String deliveryFileId = session.getDeliveryScreenshotFileId();
                 
                 Long groupMessageId = null;
+                if(user.getId_message() == 0){
+                    TelegramBot telegramBot = new TelegramBot();
+                    List<Long> messageIdAndGroup = telegramBot.createTopic(update);
+                    user.setId_message(Math.toIntExact(messageIdAndGroup.getLast()));
+                    UserDAO userDAO = new UserDAO();
+                    userDAO.update(user);
+                }
+
                 if (searchFileId != null && deliveryFileId != null) {
                     groupMessageId = createTelegramBot.sendTwoPhotosToGroup(user, text, searchFileId, deliveryFileId);
                 } else {

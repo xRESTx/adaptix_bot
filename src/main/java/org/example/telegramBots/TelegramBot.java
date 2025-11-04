@@ -318,7 +318,7 @@ public class TelegramBot extends TelegramLongPollingBot {
 
         ForumTopic topicMessage = tryCreateTopicWithRetry(topic);
         list.add(Long.valueOf(topicMessage.getMessageThreadId()));
-        sent.sendMessageUser(groupTg,topicMessage.getMessageThreadId(),update.getMessage().getText());
+        sent.sendMessageUser(groupTg,topicMessage.getMessageThreadId(),"Создана тема с " + update.getMessage().getFrom().getUserName());
         return list;
     }
 
