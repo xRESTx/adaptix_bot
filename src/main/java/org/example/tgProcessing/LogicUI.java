@@ -70,7 +70,11 @@ public class LogicUI {
             user.setAdmin(false);
             user.setBlock(false);
             user.setUserFlag(true);
-            user.setUsername(update.getMessage().getFrom().getUserName());
+            if(update.getMessage().getFrom().getUserName() == null){
+                user.setUsername(update.getMessage().getFrom().getUserName());
+            }else {
+                user.setUsername(update.getMessage().getFrom().getFirstName());
+            }
             user.setId_message(0);
             sent.sendMessageStart(user, user.getUsername() + ", Вас приветствует AdaptixBot", sendMessage);
             userDAO.save(user);
