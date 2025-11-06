@@ -16,7 +16,6 @@ public class TechnicalSupport {
     @Column(name = "name", nullable = false, length = 255)
     private String username;
 
-
     @Column(name = "key", nullable = false, length = 255)
     private String key;
 

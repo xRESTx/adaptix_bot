@@ -1,7 +1,6 @@
 package org.example.dao;
 
 import org.example.database.DatabaseManager;
-import org.example.table.Photo;
 import org.example.table.TechnicalSupport;
 import org.hibernate.Session;
 import org.hibernate.SessionFactory;

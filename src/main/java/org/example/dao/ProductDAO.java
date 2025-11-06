@@ -36,9 +36,7 @@ public class ProductDAO {
     public List<Product> findAll() {
         try (Session session = sessionFactory.openSession()) {
             List<Product> products = session.createQuery("FROM Product", Product.class).list();
-            System.out.println("🔍 findAll: Found " + products.size() + " total products in database");
-            // Убираем детальное логирование для каждого товара - это замедляет работу
-            return products;
+             return products;
         }
     }
     public List<Product> findAllVisible() {
@@ -57,9 +55,6 @@ public class ProductDAO {
                 "FROM Product WHERE visible = true AND numberOfParticipants < numberParticipants", 
                 Product.class
             ).list();
-            
-            System.out.println("🔍 findAllAvailableForUsers: Found " + products.size() + " available products");
-            // Убираем детальное логирование для каждого товара - это замедляет работу
             return products;
         }
     }

@@ -17,9 +17,6 @@ public class Main {
             // Инициализация ботов
             TelegramBotsApi botsApi = new TelegramBotsApi(DefaultBotSession.class);
             botsApi.registerBot(new TelegramBot());
-            
-            System.out.println("✅ AdaptixBot started successfully!");
-            
             // Initialize metrics
             MetricsService metricsService = MetricsService.getInstance();
             metricsService.getMeterRegistry(); // Initialize metrics

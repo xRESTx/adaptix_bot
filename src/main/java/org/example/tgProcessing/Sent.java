@@ -87,7 +87,6 @@ public class Sent {
 
             File file = new File(filePath);
             if (!file.exists()) {
-                System.out.println("File does not exist: " + filePath);
                 return null;
             }
 
@@ -233,7 +232,6 @@ public class Sent {
 
         File file = new File(filePath);
         if (!file.exists()) {
-            System.out.println("File does not exist: " + filePath);
             return;
         }
 
@@ -249,7 +247,6 @@ public class Sent {
 
         File file = new File(filePath);
         if (!file.exists()) {
-            System.out.println("File does not exist: " + filePath);
             return;
         }
 
@@ -275,9 +272,7 @@ public class Sent {
             textMessage.setMessageThreadId(user.getId_message());
             
             Message textMsg = telegramBot.trySendMessage(textMessage);
-            if (textMsg != null) {
-                System.out.println("✅ Text message sent successfully with ID: " + textMsg.getMessageId());
-            } else {
+            if (textMsg == null) {
                 System.err.println("❌ Failed to send text message");
                 return null;
             }
@@ -293,8 +288,6 @@ public class Sent {
                     firstPhoto.setMessageThreadId(user.getId_message());
                     
                     telegramBot.trySendPhoto(firstPhoto);
-                    System.out.println("✅ Successfully sent first photo with file_id: " + searchFileId);
-                    
                 } catch (Exception e) {
                     System.err.println("❌ Failed to send first photo: " + e.getMessage());
                 }
@@ -311,8 +304,7 @@ public class Sent {
                     secondPhoto.setMessageThreadId(user.getId_message());
                     
                     telegramBot.trySendPhoto(secondPhoto);
-                    System.out.println("✅ Successfully sent second photo with file_id: " + deliveryFileId);
-                    
+
                 } catch (Exception e) {
                     System.err.println("❌ Failed to send second photo: " + e.getMessage());
                 }
@@ -391,7 +383,6 @@ public class Sent {
             copyMessage.setFromChatId(String.valueOf(groupId));
             copyMessage.setMessageId(messageId);
             
-            System.out.println("📋 Copying message from group " + groupId + " message " + messageId + " to user " + userId);
             telegramBot.trySendMessage(copyMessage);
             
         } catch (Exception e) {
@@ -412,8 +403,7 @@ public class Sent {
             // Скрываем имя отправителя
             forwardMessage.setDisableNotification(true);
             
-            System.out.println("📤 Forwarding message anonymously from group " + groupId + " message " + messageId + " to user " + userId);
-            telegramBot.trySendMessage(forwardMessage);
+           telegramBot.trySendMessage(forwardMessage);
             
         } catch (Exception e) {
             System.err.println("❌ Error forwarding message anonymously from group: " + e.getMessage());
@@ -431,7 +421,6 @@ public class Sent {
             forwardMessage.setFromChatId(String.valueOf(groupId));
             forwardMessage.setMessageId(messageId);
             
-            System.out.println("📤 Forwarding message from group " + groupId + " message " + messageId + " to user " + userId);
             telegramBot.trySendMessage(forwardMessage);
             
         } catch (Exception e) {
@@ -455,7 +444,6 @@ public class Sent {
             sendPhoto.setChatId(groupId);
             sendPhoto.setPhoto(new InputFile(photoFileId));
             
-            System.out.println("📸 Forwarding photo to group " + groupId + " with file ID: " + photoFileId);
             telegramBot.trySendPhoto(sendPhoto);
         } catch (Exception e) {
             System.err.println("❌ Ошибка при пересылке фото в группу: " + e.getMessage());
@@ -487,7 +475,6 @@ public class Sent {
             sendVideo.setChatId(groupId);
             sendVideo.setVideo(new InputFile(videoFileId));
             
-            System.out.println("🎥 Forwarding video to group " + groupId + " with file ID: " + videoFileId);
             telegramBot.trySendVideo(sendVideo);
         } catch (Exception e) {
             System.err.println("❌ Ошибка при пересылке видео в группу: " + e.getMessage());
@@ -514,7 +501,6 @@ public class Sent {
             forwardMessage.setFromChatId(fromChatId);
             forwardMessage.setMessageId(messageId);
             
-            System.out.println("📤 Forwarding message " + messageId + " from chat " + fromChatId + " to group " + groupId);
             telegramBot.tryForwardMessage(forwardMessage);
         } catch (Exception e) {
             System.err.println("❌ Ошибка при пересылке сообщения в группу: " + e.getMessage());
@@ -546,7 +532,6 @@ public class Sent {
             sendPhoto.setChatId(groupId);
             sendPhoto.setPhoto(new InputFile(photoFile));
             
-            System.out.println("📸 Sending photo from file to group " + groupId + ": " + filePath);
             telegramBot.trySendPhoto(sendPhoto);
         } catch (Exception e) {
             System.err.println("❌ Ошибка при отправке фото из файла в группу: " + e.getMessage());
@@ -570,7 +555,6 @@ public class Sent {
             sendPhoto.setPhoto(new InputFile(photoFile));
             sendPhoto.setMessageThreadId(messageThreadId);
             
-            System.out.println("📸 Sending photo from file to group " + groupId + " in thread " + messageThreadId + ": " + filePath);
             telegramBot.trySendPhoto(sendPhoto);
         } catch (Exception e) {
             System.err.println("❌ Ошибка при отправке фото из файла в подгруппу: " + e.getMessage());
@@ -593,7 +577,6 @@ public class Sent {
             sendVideo.setChatId(groupId);
             sendVideo.setVideo(new InputFile(videoFile));
             
-            System.out.println("🎥 Sending video from file to group " + groupId + ": " + filePath);
             telegramBot.trySendVideo(sendVideo);
         } catch (Exception e) {
             System.err.println("❌ Ошибка при отправке видео из файла в группу: " + e.getMessage());
@@ -617,7 +600,6 @@ public class Sent {
             sendVideo.setVideo(new InputFile(videoFile));
             sendVideo.setMessageThreadId(messageThreadId);
             
-            System.out.println("🎥 Sending video from file to group " + groupId + " in thread " + messageThreadId + ": " + filePath);
             telegramBot.trySendVideo(sendVideo);
         } catch (Exception e) {
             System.err.println("❌ Ошибка при отправке видео из файла в подгруппу: " + e.getMessage());
@@ -635,7 +617,6 @@ public class Sent {
             deleteMessage.setMessageId(messageId);
             
             telegramBot.execute(deleteMessage);
-            System.out.println("✅ Message deleted: " + messageId);
         } catch (Exception e) {
             System.err.println("❌ Error deleting message: " + e.getMessage());
         }
@@ -652,7 +633,6 @@ public class Sent {
         message.setReplyMarkup(markup);
         message.setMessageThreadId(messageThreadId);
         
-        System.out.println("📝 Sending message to group " + groupId + " in thread " + messageThreadId);
         return telegramBot.trySendMessage(message);
     }
     
@@ -673,15 +653,9 @@ public class Sent {
             sendPhoto.setPhoto(new InputFile(photoFileId));
             sendPhoto.setMessageThreadId(messageThreadId);
             
-            System.out.println("📸 Sending photo to group " + groupId + " in thread " + messageThreadId + " with file ID: " + photoFileId);
-            
+
             org.telegram.telegrambots.meta.api.objects.Message response = telegramBot.execute(sendPhoto);
-            
-            if (response != null) {
-                System.out.println("✅ Photo sent successfully!");
-            } else {
-                System.err.println("❌ Failed to send photo");
-            }
+
         } catch (Exception e) {
             System.err.println("❌ Ошибка при отправке фото в группу: " + e.getMessage());
             System.err.println("❌ File ID: " + photoFileId + ", Thread: " + messageThreadId);
@@ -698,16 +672,8 @@ public class Sent {
             sendVideo.setChatId(String.valueOf(groupId));
             sendVideo.setVideo(new InputFile(videoFileId));
             sendVideo.setMessageThreadId(messageThreadId);
-            
-            System.out.println("🎥 Sending video to group " + groupId + " in thread " + messageThreadId + " with file ID: " + videoFileId);
-            
+
             org.telegram.telegrambots.meta.api.objects.Message response = telegramBot.execute(sendVideo);
-            
-            if (response != null) {
-                System.out.println("✅ Video sent successfully!");
-            } else {
-                System.err.println("❌ Failed to send video");
-            }
         } catch (Exception e) {
             System.err.println("❌ Ошибка при отправке видео в группу: " + e.getMessage());
             System.err.println("❌ File ID: " + videoFileId + ", Thread: " + messageThreadId);
@@ -738,7 +704,6 @@ public class Sent {
                 sendPhoto.setPhoto(new InputFile(fileId));
                 sendPhoto.setMessageThreadId(messageThreadId);
                 
-                System.out.println("📸 Forwarding photo to user topic " + messageThreadId + " in group " + groupId + " with file ID: " + fileId);
                 telegramBot.trySendPhoto(sendPhoto);
                 
             } else if (mediaType.equals("video")) {
@@ -747,7 +712,6 @@ public class Sent {
                 sendVideo.setVideo(new InputFile(fileId));
                 sendVideo.setMessageThreadId(messageThreadId);
                 
-                System.out.println("🎥 Forwarding video to user topic " + messageThreadId + " in group " + groupId + " with file ID: " + fileId);
                 telegramBot.trySendVideo(sendVideo);
             }
             
@@ -777,8 +741,7 @@ public class Sent {
             long groupId = Long.parseLong(rb.getString("tg.group"));
             int userTopicId = user.getId_message();
             
-            System.out.println("📸 Sending search screenshot for user " + user.getIdUser() + " to topic " + userTopicId);
-            
+
             // Отправляем заголовок
             SendMessage headerMessage = new SendMessage();
             headerMessage.setChatId(String.valueOf(groupId));
@@ -795,8 +758,7 @@ public class Sent {
                 photo.setMessageThreadId(userTopicId);
                 
                 telegramBot.trySendPhoto(photo);
-                System.out.println("✅ Successfully sent search screenshot with file_id: " + photoFileId);
-            }
+                }
             
         } catch (Exception e) {
             System.err.println("❌ Ошибка при отправке скриншота поиска: " + e.getMessage());
@@ -813,8 +775,7 @@ public class Sent {
             long groupId = Long.parseLong(rb.getString("tg.group"));
             int userTopicId = user.getId_message();
             
-            System.out.println("📦 Sending delivery screenshot for user " + user.getIdUser() + " to topic " + userTopicId);
-            
+
             // Отправляем заголовок
             SendMessage headerMessage = new SendMessage();
             headerMessage.setChatId(String.valueOf(groupId));
@@ -831,7 +792,6 @@ public class Sent {
                 photo.setMessageThreadId(userTopicId);
                 
                 telegramBot.trySendPhoto(photo);
-                System.out.println("✅ Successfully sent delivery screenshot with file_id: " + photoFileId);
             }
             
         } catch (Exception e) {
@@ -845,8 +805,7 @@ public class Sent {
      */
     public void forwardAllUserMediaToTopic(User user, String searchScreenshotFileId, String deliveryScreenshotFileId) {
         try {
-            System.out.println("📤 Sending all media for user " + user.getIdUser() + " to their topic");
-            
+
             // Отправляем скриншот поиска
             if (searchScreenshotFileId != null && !searchScreenshotFileId.trim().isEmpty()) {
                 forwardSearchScreenshotToUserTopic(user, searchScreenshotFileId);
@@ -860,8 +819,7 @@ public class Sent {
                 forwardDeliveryScreenshotToUserTopic(user, deliveryScreenshotFileId);
             }
             
-            System.out.println("✅ Successfully sent all media for user " + user.getIdUser());
-            
+
         } catch (Exception e) {
             System.err.println("❌ Ошибка при отправке всех медиа пользователя: " + e.getMessage());
             e.printStackTrace();
@@ -888,9 +846,6 @@ public class Sent {
             textMessage.setReplyMarkup(markup);
             
             Message sentMessage = telegramBot.trySendMessage(textMessage);
-            if (sentMessage != null) {
-                System.out.println("✅ Review text message sent successfully with ID: " + sentMessage.getMessageId());
-            }
             
             // Возвращаем ID текстового сообщения
             Long textMessageId = sentMessage != null ? (long) sentMessage.getMessageId() : null;
@@ -907,8 +862,6 @@ public class Sent {
                             photo.setMessageThreadId(userSubgroupId);
                             
                             telegramBot.trySendPhoto(photo);
-                            System.out.println("✅ Successfully sent review photo " + (i + 1) + " with file_id: " + photoFileIds[i]);
-                            
                         } catch (Exception e) {
                             System.err.println("❌ Failed to send review photo " + (i + 1) + ": " + e.getMessage());
                         }
@@ -926,8 +879,6 @@ public class Sent {
                     video.setMessageThreadId(userSubgroupId);
                     
                     telegramBot.trySendVideo(video);
-                    System.out.println("✅ Successfully sent review video with file_id: " + videoFileId);
-                    
                 } catch (Exception e) {
                     System.err.println("❌ Failed to send review video: " + e.getMessage());
                 }
@@ -961,10 +912,6 @@ public class Sent {
             textMessage.setReplyMarkup(markup);
             
             Message sentMessage = telegramBot.trySendMessage(textMessage);
-            if (sentMessage != null) {
-                System.out.println("✅ Cashback text message sent successfully with ID: " + sentMessage.getMessageId());
-            }
-            
             // Возвращаем ID текстового сообщения
             Long textMessageId = sentMessage != null ? (long) sentMessage.getMessageId() : null;
             
@@ -978,8 +925,7 @@ public class Sent {
                     photo.setMessageThreadId(userSubgroupId);
                     
                     telegramBot.trySendPhoto(photo);
-                    System.out.println("✅ Successfully sent cashback screenshot with file_id: " + screenshotFileId);
-                    
+
                 } catch (Exception e) {
                     System.err.println("❌ Failed to send cashback screenshot: " + e.getMessage());
                 }

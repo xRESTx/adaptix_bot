@@ -252,23 +252,15 @@ public class RedisSessionStore {
         System.out.println("🔍 DEBUG: setReviewSubmissionSession called for chatId " + chatId);
         try {
             String key = REVIEW_SUBMISSION_PREFIX + chatId;
-            System.out.println("🔍 DEBUG: Redis key = " + key);
             String sessionJson = objectMapper.writeValueAsString(session);
-            System.out.println("🔍 DEBUG: Session JSON length = " + sessionJson.length());
             redisManager.setSession(key, sessionJson);
-            System.out.println("🔍 DEBUG: Session saved to Redis successfully");
             
             // Также сохраняем в память как fallback
             memoryReviewSubmissions.put(chatId, session);
-            System.out.println("🔍 DEBUG: Session saved to memory successfully");
             
         } catch (JsonProcessingException e) {
-            System.out.println("🔍 DEBUG: JsonProcessingException in setReviewSubmissionSession: " + e.getMessage());
-            // Silent fallback to memory
             memoryReviewSubmissions.put(chatId, session);
         } catch (Exception e) {
-            System.out.println("🔍 DEBUG: Exception in setReviewSubmissionSession: " + e.getMessage());
-            // Silent fallback to memory
             memoryReviewSubmissions.put(chatId, session);
         }
     }

@@ -38,7 +38,6 @@
         <property name="hibernate.jdbc.batch_versioned_data">true</property>
 
         <!-- Указываем классы-сущности -->
-        <mapping class="org.example.table.Photo"/>
         <mapping class="org.example.table.Product"/>
         <mapping class="org.example.table.Purchase"/>
         <mapping class="org.example.table.User"/>

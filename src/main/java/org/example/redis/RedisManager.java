@@ -205,7 +205,6 @@ public class RedisManager {
      */
     public void shutdown() {
         if (jedisPool != null && !jedisPool.isClosed()) {
-            System.out.println("🔄 Closing Redis connection pool...");
             jedisPool.close();
             jedisPool = null;
         }

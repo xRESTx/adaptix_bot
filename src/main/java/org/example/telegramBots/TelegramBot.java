@@ -50,32 +50,9 @@ public class TelegramBot extends TelegramLongPollingBot {
     public void onUpdatesReceived(List<Update> updates) {
         for(Update update : updates){
             executor.submit(()-> {
-                System.out.println("🔍 === TELEGRAM BOT UPDATE RECEIVED ===");
-                System.out.println("🔍 Update ID: " + update.getUpdateId());
-                System.out.println("🔍 Has callback query: " + update.hasCallbackQuery());
-                System.out.println("🔍 Has message: " + update.hasMessage());
-                if (update.hasMessage()) {
-                    System.out.println("🔍 Message chat ID: " + update.getMessage().getChatId());
-                    System.out.println("🔍 Message ID: " + update.getMessage().getMessageId());
-                    System.out.println("🔍 Chat type: " + update.getMessage().getChat().getType());
-                }
-                if (update.hasCallbackQuery()) {
-                    System.out.println("🔍 Callback query ID: " + update.getCallbackQuery().getId());
-                    System.out.println("🔍 Callback data: " + update.getCallbackQuery().getData());
-                    System.out.println("🔍 Callback chat ID: " + update.getCallbackQuery().getMessage().getChatId());
-                }
-                System.out.println("🔍 === END TELEGRAM BOT UPDATE LOG ===");
-                
                 MessageProcessing messageProcessing = threadLocalProcessing.get();
                 try {
                     if (update.hasCallbackQuery()) {
-                        System.out.println("🔍 === TELEGRAM BOT CALLBACK QUERY DETECTED ===");
-                        System.out.println("🔍 Update ID: " + update.getUpdateId());
-                        System.out.println("🔍 Callback data: " + update.getCallbackQuery().getData());
-                        System.out.println("🔍 Chat ID: " + update.getCallbackQuery().getMessage().getChatId());
-                        System.out.println("🔍 Message ID: " + update.getCallbackQuery().getMessage().getMessageId());
-                        System.out.println("🔍 === CALLING callBackQuery METHOD ===");
-                        
                         messageProcessing.callBackQuery(update);
                         return;
                     }

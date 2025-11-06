@@ -42,7 +42,6 @@ public class AdminSettings {
         technicalSupportDAO.update(technicalSupport);
 
         settings.put(key, value);
-        System.out.println("🔧 Admin setting updated: " + key + " = " + value);
     }
     
     /**

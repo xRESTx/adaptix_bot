@@ -71,13 +71,6 @@ public class MetricsEndpoint {
             
             server.setExecutor(null);
             server.start();
-            
-            System.out.println("🚀 HTTP metrics server started on port " + actualPort);
-            System.out.println("📊 Prometheus metrics: http://localhost:" + actualPort + "/metrics");
-            System.out.println("❤️ Health check: http://localhost:" + actualPort + "/health");
-            System.out.println("📈 JSON metrics: http://localhost:" + actualPort + "/api/metrics");
-            System.out.println("📊 Statistics: http://localhost:" + actualPort + "/api/stats");
-            
         } catch (IOException e) {
             System.err.println("❌ HTTP metrics server startup error: " + e.getMessage());
         }

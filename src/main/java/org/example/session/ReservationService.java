@@ -1,8 +1,9 @@
 package org.example.session;
 
-import org.example.dao.ProductDAO;
 import org.example.table.Product;
 import org.example.table.User;
+import org.example.tgProcessing.LogicUI;
+import org.example.tgProcessing.Sent;
 
 import java.time.LocalDateTime;
 import java.util.concurrent.ConcurrentHashMap;
@@ -20,8 +21,8 @@ public class ReservationService {
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
     
     private ReservationService() {
-        // Запускаем задачу очистки просроченных броней каждые 5 минут
-        scheduler.scheduleAtFixedRate(this::cleanupExpiredReservations, 5, 5, TimeUnit.MINUTES);
+        // Запускаем задачу проверки неактивных броней каждую минуту
+        scheduler.scheduleAtFixedRate(this::checkInactiveReservations, 0, 1, TimeUnit.MINUTES);
     }
     
     public static ReservationService getInstance() {
@@ -48,11 +49,11 @@ public class ReservationService {
         boolean success = ReservationManager.incrementProductParticipants(product.getIdProduct());
         
         if (success) {
-            // Создаем бронь
-            Reservation reservation = new Reservation(user, product, LocalDateTime.now());
+            // Создаем бронь с текущим временем активности
+            LocalDateTime now = LocalDateTime.now();
+            Reservation reservation = new Reservation(user, product, now, now);
             reservations.put(key, reservation);
             
-            System.out.println("✅ Product " + product.getIdProduct() + " reserved for user " + user.getIdUser());
             return true;
         }
         
@@ -70,7 +71,6 @@ public class ReservationService {
             // Уменьшаем количество участников
             ReservationManager.decrementProductParticipants(product.getIdProduct());
             
-            System.out.println("❌ Reservation cancelled for user " + user.getIdUser() + ", product " + product.getIdProduct());
             return true;
         }
         
@@ -95,23 +95,109 @@ public class ReservationService {
     }
     
     /**
-     * Очистка просроченных броней (старше 30 минут)
+     * Обновить время последней активности пользователя в бронировании
      */
-    private void cleanupExpiredReservations() {
-        LocalDateTime cutoffTime = LocalDateTime.now().minusMinutes(30);
+    public void updateLastActivity(User user, Product product) {
+        String key = user.getIdUser() + "_" + product.getIdProduct();
+        Reservation reservation = reservations.get(key);
+        if (reservation != null) {
+            reservation.updateLastActivity();
+        }
+    }
+    
+    /**
+     * Проверка неактивных броней и отправка уведомлений
+     * Для тестов: 1 минута неактивности
+     * В продакшене: 30 минут неактивности
+     */
+    private void checkInactiveReservations() {
+        LocalDateTime now = LocalDateTime.now();
+        // Для тестов: 1 минута, для продакшена: 30 минут
+        LocalDateTime inactiveThreshold = now.minusMinutes(28);
+        // Время после уведомления для автоматической отмены (еще 1 минута)
+        LocalDateTime cancelThreshold = now.minusMinutes(2);
         
         reservations.entrySet().removeIf(entry -> {
             Reservation reservation = entry.getValue();
-            if (reservation.getReservedAt().isBefore(cutoffTime)) {
+            LocalDateTime lastActivity = reservation.getLastActivityTime();
+            
+            // Если прошло более 2 минут с последней активности - снимаем бронь
+            if (lastActivity.isBefore(cancelThreshold)) {
+                // Отправляем уведомление об отмене и очищаем сессию
+                cancelReservationWithNotification(reservation);
+                
                 // Уменьшаем количество участников
                 ReservationManager.decrementProductParticipants(reservation.getProduct().getIdProduct());
                 
-                System.out.println("🕐 Auto-cancelled expired reservation for user " + 
-                    reservation.getUser().getIdUser() + ", product " + reservation.getProduct().getIdProduct());
+                System.out.println("🕐 Auto-cancelled inactive reservation for user " + 
+                    reservation.getUser().getIdUser() + ", product " + reservation.getProduct().getIdProduct() +
+                    " (inactive for more than 30 minutes)");
                 return true;
             }
+            
+            // Если прошло более 30 минуты с последней активности и уведомление еще не отправлено
+            if (lastActivity.isBefore(inactiveThreshold) && !reservation.isNotificationSent()) {
+                // Отправляем уведомление пользователю
+                sendInactivityNotification(reservation);
+                reservation.markNotificationSent();
+                System.out.println("📢 Sent inactivity notification to user " + 
+                    reservation.getUser().getIdUser() + " for product " + reservation.getProduct().getIdProduct());
+            }
+            
             return false;
         });
+    }
+    
+    /**
+     * Отправить уведомление пользователю о неактивности
+     */
+    private void sendInactivityNotification(Reservation reservation) {
+        try {
+            User user = reservation.getUser();
+            Product product = reservation.getProduct();
+            
+            String message = "⏰ <b>Напоминание о бронировании</b>\n\n" +
+                           "Вы начали оформление покупки товара <b>\"" + product.getProductName() + "\"</b>, " +
+                           "но не завершили процесс.\n\n" +
+                           "⚠️ Если вы не продолжите оформление в течение 2 минут " +
+                           "бронирование будет автоматически отменено, и товар станет доступен другим пользователям.\n\n" +
+                           "Продолжите оформление заказа, чтобы не потерять место в акции!";
+            
+            Sent sent = new Sent();
+            sent.sendMessage(user, message);
+        } catch (Exception e) {
+            System.err.println("❌ Error sending inactivity notification: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * Отменить бронь с уведомлением и очисткой сессии
+     */
+    private void cancelReservationWithNotification(Reservation reservation) {
+        try {
+            User user = reservation.getUser();
+            Product product = reservation.getProduct();
+            long chatId = user.getIdUser();
+            
+            // Отправляем уведомление об отмене
+            String message = "❌ <b>Бронирование отменено</b>\n\n" +
+                           "Ваше бронирование товара <b>\"" + product.getProductName() + "\"</b> было автоматически отменено " +
+                           "из-за неактивности более 30 минут.\n\n" +
+                           "Товар снова доступен для бронирования другими пользователями.\n\n" +
+                           "Если вы хотите приобрести этот товар, пожалуйста, начните процесс заново.";
+
+            LogicUI logicUI = new LogicUI();
+            logicUI.sendMenu(user,message);
+            
+            // Очищаем сессию пользователя
+            RedisSessionStore.removeReviewSession(chatId);
+            RedisSessionStore.removeState(chatId);
+            
+        } catch (Exception e) {
+            System.err.println("❌ Error cancelling reservation with notification: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
     
     /**
@@ -143,15 +229,32 @@ public class ReservationService {
         private final User user;
         private final Product product;
         private final LocalDateTime reservedAt;
+        private LocalDateTime lastActivityTime;
+        private boolean notificationSent;
         
-        public Reservation(User user, Product product, LocalDateTime reservedAt) {
+        public Reservation(User user, Product product, LocalDateTime reservedAt, LocalDateTime lastActivityTime) {
             this.user = user;
             this.product = product;
             this.reservedAt = reservedAt;
+            this.lastActivityTime = lastActivityTime;
+            this.notificationSent = false;
         }
         
         public User getUser() { return user; }
         public Product getProduct() { return product; }
         public LocalDateTime getReservedAt() { return reservedAt; }
+        public LocalDateTime getLastActivityTime() { return lastActivityTime; }
+        public boolean isNotificationSent() { return notificationSent; }
+        
+        public void updateLastActivity() {
+            this.lastActivityTime = LocalDateTime.now();
+            // Сбрасываем флаг уведомления, если пользователь снова активен
+            // Это позволит отправить уведомление снова, если пользователь снова станет неактивным
+            this.notificationSent = false;
+        }
+        
+        public void markNotificationSent() {
+            this.notificationSent = true;
+        }
     }
 }

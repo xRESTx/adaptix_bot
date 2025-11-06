@@ -49,7 +49,6 @@ public class ReservationCleanupService {
                 scheduler.shutdownNow();
                 Thread.currentThread().interrupt();
             }
-            System.out.println("🛑 Reservation cleanup service stopped");
         }
     }
 }
