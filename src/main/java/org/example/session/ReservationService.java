@@ -45,7 +45,6 @@ public class ReservationService {
         }
         
         // Увеличиваем количество участников
-        ProductDAO productDAO = new ProductDAO();
         boolean success = ReservationManager.incrementProductParticipants(product.getIdProduct());
         
         if (success) {

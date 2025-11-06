@@ -70,7 +70,7 @@ public class LogicUI {
             user.setAdmin(false);
             user.setBlock(false);
             user.setUserFlag(true);
-            if(update.getMessage().getFrom().getUserName() == null){
+            if(update.getMessage().getFrom().getUserName() != null){
                 user.setUsername(update.getMessage().getFrom().getUserName());
             }else {
                 user.setUsername(update.getMessage().getFrom().getFirstName());

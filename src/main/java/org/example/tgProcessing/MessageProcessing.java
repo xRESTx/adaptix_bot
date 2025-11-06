@@ -215,12 +215,7 @@ public class MessageProcessing {
         }
 
         User user = userDAO.findById(chatId);
-//        if (user != null) {
-//            createTelegramBot.sendMessageUser(groupID, user.getId_message(), "Пользователь: " + msg);
-//        } else {
-//            logicUI.sendStart(chatId, update);
-//            return;
-//        }
+        if (user.isBlock()) return;
 
         if(user == null){
             System.out.println("🚨 User is null, sending start message");
@@ -388,20 +383,20 @@ public class MessageProcessing {
         }
 
         if(msg!=null){
-            
             switch (msg) {
                 case "/start" -> {
                     // Отменяем бронь товара при переходе в главное меню
                     cancelUserReservation(user, chatId);
                     logicUI.sendStart(chatId, update);
                 }
-                           case "Админ меню" -> {
-                               // Показываем админ-меню (обычное меню остается)
-                               logicUI.showAdminMenu(user);
-                               metricsService.recordAdminAction();
-                           }
+               case "Админ меню" -> {
+                    if(user.isAdmin()){
+                        // Показываем админ-меню (обычное меню остается)
+                        logicUI.showAdminMenu(user);
+                        metricsService.recordAdminAction();
+                    }
+               }
                 case "Каталог товаров" -> {
-                    if (user.isBlock()) break;
                     // Ограничение: не чаще 1 заказа в 14 дней (кроме администраторов)
                     if (!user.isAdmin()) {
                         PurchaseDAO purchaseDAO = new PurchaseDAO();
@@ -429,7 +424,6 @@ public class MessageProcessing {
                     logicUI.sendProducts(user);
                 }
                 case "Оставить отзыв" -> {
-                    if (user.isBlock()) break;
                     // Показываем товары пользователя для выбора отзыва
                     logicUI.showUserProductsForReview(user);
                 }
@@ -438,19 +432,19 @@ public class MessageProcessing {
                     createTelegramBot.sendMessage(user, "🆘 Техподдержка: " + supportMention + "\n\nОпишите вашу проблему, и мы обязательно поможем!");
                 }
                 case "Получить кешбек" -> {
-                    if (user.isBlock()) break;
                     // Показываем покупки пользователя для получения кешбека
                     logicUI.showUserPurchases(user);
                 }
                 case "Личный кабинет" -> {
-                    if (user.isBlock()) break;
                     // Показываем личный кабинет пользователя
                     logicUI.showUserCabinet(user);
                 }
                 // Обработка кнопки "⬅️ Назад" перенесена выше для приоритетной обработки
                 case "Отмена добавления товара" -> {
-                    RedisSessionStore.removeState(chatId);
-                    logicUI.sendMenu(user, null);
+                    if(user.isAdmin()){
+                        RedisSessionStore.removeState(chatId);
+                        logicUI.sendMenu(user, null);
+                    }
                 }
                 case "Отмена покупки товара" -> {
                     // Отменяем бронь товара
@@ -1022,7 +1016,7 @@ public class MessageProcessing {
 
         UserDAO userDAO = new UserDAO();
         User user = userDAO.findById(chatId);
-        
+        if (user.isBlock()) return;
         // Если это групповой чат и пользователь не найден, проверяем callback data для обработки отзывов
         if (user == null) {
             // Обрабатываем кнопки подтверждения/отклонения отзывов в группе
@@ -1137,10 +1131,6 @@ public class MessageProcessing {
                     break;
                 }
                 case "Exit_Product":{
-                    // Не удаляем сообщение, так как оно уже было заменено на информацию о товаре
-                    // Отменяем бронь товара при выходе из карточки товара
-                    cancelUserReservation(user, chatId);
-                    
                     // Просто показываем каталог товаров
                     logicUI.sendProducts(user);
                     break;
@@ -1314,6 +1304,7 @@ public class MessageProcessing {
      * Обработка callback-запросов для админ-интерфейса
      */
     private void handleCallbackQuery(Update update, User user) {
+        if (user.isBlock()) return;
         String callbackData = update.getCallbackQuery().getData();
         int messageId = update.getCallbackQuery().getMessage().getMessageId();
         System.out.println("🔍 Callback received: " + callbackData);
