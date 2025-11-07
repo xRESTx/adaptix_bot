@@ -114,10 +114,8 @@ public class MessageProcessing {
         if (user.isBlock()) {
             if (msg.equals("Техподдержка")) {
                 String supportMention = AdminSettings.getInstance().getSupportMention();
-                System.out.println("ASDASDASD");
                 createTelegramBot.sendMessage(user,
                         "🆘 Техподдержка: " + supportMention + "\n\nОпишите вашу проблему, и мы обязательно поможем!");
-                System.out.println("ASDASDASD1");
             }
             return; // для всех заблокированных пользователей завершаем метод
         }
@@ -778,6 +776,7 @@ public class MessageProcessing {
         // Сохраняем file_id и ID сообщения в сессии для последующей отправки
         session.setDeliveryScreenshotFileId(fileId);
         session.setDeliveryScreenshotMessageId(message.getMessageId());
+
         RedisSessionStore.setReviewSession(chatId, session);
         
         // Обновляем активность пользователя
@@ -798,9 +797,11 @@ public class MessageProcessing {
                         "3️⃣ После утверждения отзыва администратором, перейдите в раздел " +
                         "→ «💸 Получить кешбек» и отправьте скриншот вашего отзыва";
 
-                // Бронь остается активной, так как покупка завершена успешно
-                // Количество участников остается увеличенным
-                
+                // Завершаем бронирование, чтобы убрать пользователя из мониторинга неактивности
+                if (session.getProduct() != null) {
+                    ReservationService.getInstance().completeReservation(user, session.getProduct());
+                }
+
                 LogicUI logicUI = new LogicUI();
                 logicUI.sendMenu(user, finishText);
                 RedisSessionStore.removeReviewSession(chatId);

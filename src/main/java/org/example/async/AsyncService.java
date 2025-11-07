@@ -97,7 +97,6 @@ public class AsyncService {
                 
                 PurchaseDAO purchaseDAO = new PurchaseDAO();
                 purchaseDAO.save(purchase);
-                
                 // Увеличиваем количество участников товара
                 ReservationManager.incrementProductParticipants(session.getProduct().getIdProduct());
 

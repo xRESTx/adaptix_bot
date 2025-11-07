@@ -27,17 +27,17 @@ public class Main {
             // Start reservation cleanup service
             ReservationCleanupService.start();
             
-            // Add shutdown hook for graceful shutdown
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                System.out.println("🔄 Shutting down AdaptixBot...");
-                MetricsEndpoint.stop();
-                ReservationCleanupService.stop();
-                AsyncService.shutdown();
-                DatabaseManager.getInstance().shutdown();
-                RedisManager.getInstance().shutdown();
-                System.out.println("✅ Graceful shutdown completed");
-            }));
-            
+//            // Add shutdown hook for graceful shutdown
+//            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+//                System.out.println("🔄 Shutting down AdaptixBot...");
+//                MetricsEndpoint.stop();
+//                ReservationCleanupService.stop();
+//                AsyncService.shutdown();
+//                DatabaseManager.getInstance().shutdown();
+//                RedisManager.getInstance().shutdown();
+//                System.out.println("✅ Graceful shutdown completed");
+//            }));
+//
         } catch (TelegramApiException e) {
             System.err.println("❌ Bot startup error: " + e.getMessage());
             
@@ -64,12 +64,12 @@ public class Main {
                 System.err.println("   Only Telegram bot functionality will be unavailable.");
                 
                 // Не завершаем приложение, позволяем ему работать в фоновом режиме
-                try {
-                    // Ждем в фоновом режиме
-                    Thread.sleep(Long.MAX_VALUE);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                }
+//                try {
+//                    // Ждем в фоновом режиме
+//                    Thread.sleep(Long.MAX_VALUE);
+//                } catch (InterruptedException ie) {
+//                    Thread.currentThread().interrupt();
+//                }
             } else {
                 // Для других ошибок завершаем приложение
                 System.err.println("❌ Critical error occurred. Shutting down application.");

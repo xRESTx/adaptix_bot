@@ -16,6 +16,9 @@ import java.util.concurrent.TimeUnit;
  */
 public class ReservationService {
     
+    private static final long INACTIVITY_WARNING_MINUTES = Long.getLong("reservation.warning.minutes", 1L);
+    private static final long CANCELLATION_GRACE_MINUTES = Long.getLong("reservation.cancellation.grace.minutes", 1L);
+
     private static final ReservationService instance = new ReservationService();
     private final ConcurrentHashMap<String, Reservation> reservations = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
@@ -112,16 +115,14 @@ public class ReservationService {
      */
     private void checkInactiveReservations() {
         LocalDateTime now = LocalDateTime.now();
-        // Для тестов: 1 минута, для продакшена: 30 минут
-        LocalDateTime inactiveThreshold = now.minusMinutes(28);
-        // Время после уведомления для автоматической отмены (еще 1 минута)
-        LocalDateTime cancelThreshold = now.minusMinutes(2);
+        LocalDateTime inactiveThreshold = now.minusMinutes(INACTIVITY_WARNING_MINUTES);
+        LocalDateTime cancelThreshold = now.minusMinutes(INACTIVITY_WARNING_MINUTES + CANCELLATION_GRACE_MINUTES);
         
         reservations.entrySet().removeIf(entry -> {
             Reservation reservation = entry.getValue();
             LocalDateTime lastActivity = reservation.getLastActivityTime();
             
-            // Если прошло более 2 минут с последней активности - снимаем бронь
+            // Если прошло более (INACTIVITY_WARNING + GRACE) минут с последней активности - снимаем бронь
             if (lastActivity.isBefore(cancelThreshold)) {
                 // Отправляем уведомление об отмене и очищаем сессию
                 cancelReservationWithNotification(reservation);
@@ -131,11 +132,11 @@ public class ReservationService {
                 
                 System.out.println("🕐 Auto-cancelled inactive reservation for user " + 
                     reservation.getUser().getIdUser() + ", product " + reservation.getProduct().getIdProduct() +
-                    " (inactive for more than 30 minutes)");
+                    " (inactive for more than " + (INACTIVITY_WARNING_MINUTES + CANCELLATION_GRACE_MINUTES) + " minutes)");
                 return true;
             }
             
-            // Если прошло более 30 минуты с последней активности и уведомление еще не отправлено
+            // Если прошло более INACTIVITY_WARNING_MINUTES с последней активности и уведомление еще не отправлено
             if (lastActivity.isBefore(inactiveThreshold) && !reservation.isNotificationSent()) {
                 // Отправляем уведомление пользователю
                 sendInactivityNotification(reservation);
@@ -159,7 +160,7 @@ public class ReservationService {
             String message = "⏰ <b>Напоминание о бронировании</b>\n\n" +
                            "Вы начали оформление покупки товара <b>\"" + product.getProductName() + "\"</b>, " +
                            "но не завершили процесс.\n\n" +
-                           "⚠️ Если вы не продолжите оформление в течение 2 минут " +
+                           "⚠️ Если вы не продолжите оформление в течение " + CANCELLATION_GRACE_MINUTES + " минут после этого сообщения, " +
                            "бронирование будет автоматически отменено, и товар станет доступен другим пользователям.\n\n" +
                            "Продолжите оформление заказа, чтобы не потерять место в акции!";
             
@@ -181,9 +182,10 @@ public class ReservationService {
             long chatId = user.getIdUser();
             
             // Отправляем уведомление об отмене
+            long minutesWithoutActivity = INACTIVITY_WARNING_MINUTES + CANCELLATION_GRACE_MINUTES;
             String message = "❌ <b>Бронирование отменено</b>\n\n" +
                            "Ваше бронирование товара <b>\"" + product.getProductName() + "\"</b> было автоматически отменено " +
-                           "из-за неактивности более 30 минут.\n\n" +
+                           "из-за неактивности более " + minutesWithoutActivity + " минут.\n\n" +
                            "Товар снова доступен для бронирования другими пользователями.\n\n" +
                            "Если вы хотите приобрести этот товар, пожалуйста, начните процесс заново.";
 
@@ -222,6 +224,17 @@ public class ReservationService {
         }
     }
     
+    /**
+     * Завершить бронирование без изменения количества участников (успешное завершение покупки)
+     */
+    public void completeReservation(User user, Product product) {
+        if (user == null || product == null) {
+            return;
+        }
+        String key = user.getIdUser() + "_" + product.getIdProduct();
+        reservations.remove(key);
+    }
+
     /**
      * Класс для хранения информации о бронировании
      */

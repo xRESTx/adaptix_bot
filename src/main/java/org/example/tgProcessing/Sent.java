@@ -1,5 +1,6 @@
 package org.example.tgProcessing;
 
+import org.example.dao.UserDAO;
 import org.example.telegramBots.TelegramBot;
 import org.example.table.User;
 import org.telegram.telegrambots.meta.api.methods.CopyMessage;
@@ -23,6 +24,25 @@ import java.util.ResourceBundle;
 
 public class Sent {
     TelegramBot telegramBot = new TelegramBot();
+
+    private Integer ensureUserThread(User user) {
+        if (user == null) {
+            return null;
+        }
+        if (user.getId_message() > 0) {
+            return user.getId_message();
+        }
+        Integer threadId = telegramBot.createTopicForUser(user);
+        if (threadId != null && threadId > 0) {
+            user.setId_message(threadId);
+            try {
+                new UserDAO().update(user);
+            } catch (Exception e) {
+                System.err.println("⚠️ Unable to persist user topic id: " + e.getMessage());
+            }
+        }
+        return threadId;
+    }
 
     public void sendPhoto(long chatId, Integer ThreadId, long fromChatID, int messageID){
         CopyMessage copyPhoto = new CopyMessage();
@@ -71,14 +91,19 @@ public class Sent {
     public Long sendMessageGroup(User user,String text, String filePath){
         ResourceBundle rb = ResourceBundle.getBundle("app");
         long groupID = Long.parseLong(rb.getString("tg.group"));
+        Integer threadId = ensureUserThread(user);
         if(filePath == null){
             SendMessage sendGroup = new SendMessage();
             sendGroup.setChatId(groupID);
             sendGroup.setText(text);
             sendGroup.setParseMode("HTML");
-            sendGroup.setMessageThreadId(user.getId_message());
+            if (threadId != null && threadId > 0) {
+                sendGroup.setMessageThreadId(threadId);
+            }
             Message sentMessage = telegramBot.trySendMessage(sendGroup);
-            return sentMessage != null ? (long) sentMessage.getMessageId() : null;
+            if(sentMessage!=null){
+                return Long.valueOf(sentMessage.getMessageId());
+            }
         }else {
             SendPhoto sendPhoto = new SendPhoto();
             sendPhoto.setChatId(groupID);
@@ -96,6 +121,7 @@ public class Sent {
             Message sentMessage = telegramBot.trySendPhoto(sendPhoto);
             return sentMessage != null ? (long) sentMessage.getMessageId() : null;
         }
+        return null;
     }
 
     public void sendMessageStart(User user, String messageText, SendMessage sendMessage) {
@@ -128,7 +154,9 @@ public class Sent {
         groupMessage.setChatId(chatId);
         groupMessage.setText(messageText);
         groupMessage.setParseMode("HTML");
-        groupMessage.setMessageThreadId(messageThreadId);
+        if (messageThreadId != null && messageThreadId > 0) {
+            groupMessage.setMessageThreadId(messageThreadId);
+        }
 
         telegramBot.trySendMessage(groupMessage);
     }
@@ -137,7 +165,9 @@ public class Sent {
         message.setChatId(chatId);
         message.setText(messageText);
         message.setParseMode("HTML");
-        message.setMessageThreadId(messageThreadId);
+        if (messageThreadId != null && messageThreadId > 0) {
+            message.setMessageThreadId(messageThreadId);
+        }
 
         telegramBot.trySendMessage(message);
     }
@@ -263,13 +293,16 @@ public class Sent {
         try {
             ResourceBundle rb = ResourceBundle.getBundle("app");
             long groupID = Long.parseLong(rb.getString("tg.group"));
+            Integer threadId = ensureUserThread(user);
             
             // Сначала отправляем текстовое сообщение
             SendMessage textMessage = new SendMessage();
             textMessage.setChatId(groupID);
             textMessage.setText(text);
             textMessage.setParseMode("HTML");
-            textMessage.setMessageThreadId(user.getId_message());
+            if (threadId != null && threadId > 0) {
+                textMessage.setMessageThreadId(threadId);
+            }
             
             Message textMsg = telegramBot.trySendMessage(textMessage);
             if (textMsg == null) {
@@ -285,7 +318,9 @@ public class Sent {
                     firstPhoto.setPhoto(new InputFile(searchFileId));
                     firstPhoto.setCaption("📸 <b>Скриншот поиска товара:</b>");
                     firstPhoto.setParseMode("HTML");
-                    firstPhoto.setMessageThreadId(user.getId_message());
+                    if (threadId != null && threadId > 0) {
+                        firstPhoto.setMessageThreadId(threadId);
+                    }
                     
                     telegramBot.trySendPhoto(firstPhoto);
                 } catch (Exception e) {
@@ -301,7 +336,9 @@ public class Sent {
                     secondPhoto.setPhoto(new InputFile(deliveryFileId));
                     secondPhoto.setCaption("📦 <b>Скриншот раздела доставки:</b>");
                     secondPhoto.setParseMode("HTML");
-                    secondPhoto.setMessageThreadId(user.getId_message());
+                    if (threadId != null && threadId > 0) {
+                        secondPhoto.setMessageThreadId(threadId);
+                    }
                     
                     telegramBot.trySendPhoto(secondPhoto);
 

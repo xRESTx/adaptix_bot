@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.ResourceBundle;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class TelegramBot extends TelegramLongPollingBot {
 
@@ -294,9 +295,39 @@ public class TelegramBot extends TelegramLongPollingBot {
                 .build();
 
         ForumTopic topicMessage = tryCreateTopicWithRetry(topic);
-        list.add(Long.valueOf(topicMessage.getMessageThreadId()));
-        sent.sendMessageUser(groupTg,topicMessage.getMessageThreadId(),"Создана тема с " + update.getMessage().getFrom().getUserName());
+        if (topicMessage != null) {
+            list.add(Long.valueOf(topicMessage.getMessageThreadId()));
+            sent.sendMessageUser(groupTg,topicMessage.getMessageThreadId(),"Создана тема с " + update.getMessage().getFrom().getUserName());
+        }
         return list;
+    }
+
+    public Integer createTopicForUser(org.example.table.User user) {
+        try {
+            if (user == null) {
+                return null;
+            }
+            ResourceBundle rb = ResourceBundle.getBundle("app");
+            Long groupTg = Long.parseLong(rb.getString("tg.group"));
+
+            String topicName = user.getUsername() != null && !user.getUsername().isBlank()
+                    ? user.getUsername()
+                    : "user_" + user.getIdUser();
+
+            CreateForumTopic topic = CreateForumTopic.builder()
+                    .chatId(groupTg)
+                    .name(topicName)
+                    .iconColor(0xFFD67E)
+                    .build();
+
+            ForumTopic topicMessage = tryCreateTopicWithRetry(topic);
+            if (topicMessage != null) {
+                return topicMessage.getMessageThreadId();
+            }
+        } catch (Exception e) {
+            System.err.println("❌ Failed to create topic for user " + user.getIdUser() + ": " + e.getMessage());
+        }
+        return null;
     }
 
     public ForumTopic tryCreateTopicWithRetry(CreateForumTopic topic) {
