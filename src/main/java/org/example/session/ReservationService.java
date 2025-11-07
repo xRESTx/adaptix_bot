@@ -16,8 +16,8 @@ import java.util.concurrent.TimeUnit;
  */
 public class ReservationService {
     
-    private static final long INACTIVITY_WARNING_MINUTES = Long.getLong("reservation.warning.minutes", 1L);
-    private static final long CANCELLATION_GRACE_MINUTES = Long.getLong("reservation.cancellation.grace.minutes", 1L);
+    private static final long INACTIVITY_WARNING_MINUTES = Long.getLong("reservation.warning.minutes", 30L);
+    private static final long CANCELLATION_GRACE_MINUTES = Long.getLong("reservation.cancellation.grace.minutes", 2L);
 
     private static final ReservationService instance = new ReservationService();
     private final ConcurrentHashMap<String, Reservation> reservations = new ConcurrentHashMap<>();
