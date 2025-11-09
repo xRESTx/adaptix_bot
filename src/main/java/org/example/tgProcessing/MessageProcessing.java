@@ -960,7 +960,7 @@ public class MessageProcessing {
 
         UserDAO userDAO = new UserDAO();
         User user = userDAO.findById(chatId);
-        if (user.isBlock()) return;
+        
         // Если это групповой чат и пользователь не найден, проверяем callback data для обработки отзывов
         if (user == null) {
             // Обрабатываем кнопки подтверждения/отклонения отзывов в группе
@@ -977,6 +977,9 @@ public class MessageProcessing {
             
             return;
         }
+        
+        // Проверяем, не заблокирован ли пользователь
+        if (user.isBlock()) return;
         
         // Очищаем сессии только для пользователей (не для групповых чатов)
         // ВАЖНО: не очищаем все сессии здесь, чтобы не сбрасывать активные процессы (покупка/отзыв/кешбек)
@@ -1576,73 +1579,122 @@ public class MessageProcessing {
      * Обработка callback query для подтверждения/отклонения отзывов в группе
      */
     private void handleGroupReviewCallback(Update update, String data) {
+        Sent sent = new Sent();
+        AnswerCallbackQuery answerCallbackQuery = new AnswerCallbackQuery();
+        answerCallbackQuery.setCallbackQueryId(update.getCallbackQuery().getId());
+        answerCallbackQuery.setShowAlert(false);
+        
         try {
             if (data.startsWith("approve_review_")) {
                 // Извлекаем ID покупки из callback data
-                int purchaseId = Integer.parseInt(data.substring("approve_review_".length()));
+                int purchaseId;
+                try {
+                    purchaseId = Integer.parseInt(data.substring("approve_review_".length()));
+                } catch (NumberFormatException e) {
+                    System.err.println("❌ Invalid purchase ID in callback: " + data);
+                    answerCallbackQuery.setText("❌ Ошибка: неверный ID покупки");
+                    sent.answerCallbackQuery(answerCallbackQuery);
+                    return;
+                }
                 
                 // Находим покупку
                 PurchaseDAO purchaseDAO = new PurchaseDAO();
                 Purchase purchase = purchaseDAO.findById(purchaseId);
                 
-                if (purchase != null) {
-                    // Получаем администратора, который нажал кнопку
-                    Long adminChatId = update.getCallbackQuery().getFrom().getId();
-                    UserDAO userDAO = new UserDAO();
-                    User admin = userDAO.findById(adminChatId);
-                    
-                    if (admin != null && admin.isAdmin()) {
-                        // Подтверждаем отзыв - передаем администратора
-                        handleReviewApproval(admin, purchaseId, true);
-                        
-                        // Отвечаем на callback query
-                        AnswerCallbackQuery answerCallbackQuery = new AnswerCallbackQuery();
-                        answerCallbackQuery.setCallbackQueryId(update.getCallbackQuery().getId());
-                        answerCallbackQuery.setText("✅ Отзыв подтвержден!");
-                        answerCallbackQuery.setShowAlert(false);
-                        
-                        Sent sent = new Sent();
-                        sent.answerCallbackQuery(answerCallbackQuery);
-                    } else {
-                        System.err.println("❌ Admin not found or not authorized: " + adminChatId);
-                    }
+                if (purchase == null) {
+                    System.err.println("❌ Purchase not found: " + purchaseId);
+                    answerCallbackQuery.setText("❌ Покупка не найдена");
+                    sent.answerCallbackQuery(answerCallbackQuery);
+                    return;
                 }
+                
+                // Получаем администратора, который нажал кнопку
+                Long adminChatId = update.getCallbackQuery().getFrom().getId();
+                UserDAO userDAO = new UserDAO();
+                User admin = userDAO.findById(adminChatId);
+                
+                if (admin == null) {
+                    System.err.println("❌ Admin not found in database: " + adminChatId);
+                    answerCallbackQuery.setText("❌ Администратор не найден в базе данных");
+                    sent.answerCallbackQuery(answerCallbackQuery);
+                    return;
+                }
+                
+                if (!admin.isAdmin()) {
+                    System.err.println("❌ User is not admin: " + adminChatId);
+                    answerCallbackQuery.setText("❌ У вас нет прав администратора");
+                    sent.answerCallbackQuery(answerCallbackQuery);
+                    return;
+                }
+                
+                // Подтверждаем отзыв - передаем администратора
+                handleReviewApproval(admin, purchaseId, true);
+                
+                // Отвечаем на callback query
+                answerCallbackQuery.setText("✅ Отзыв подтвержден!");
+                sent.answerCallbackQuery(answerCallbackQuery);
                 
             } else if (data.startsWith("reject_review_")) {
                 // Извлекаем ID покупки из callback data
-                int purchaseId = Integer.parseInt(data.substring("reject_review_".length()));
+                int purchaseId;
+                try {
+                    purchaseId = Integer.parseInt(data.substring("reject_review_".length()));
+                } catch (NumberFormatException e) {
+                    System.err.println("❌ Invalid purchase ID in callback: " + data);
+                    answerCallbackQuery.setText("❌ Ошибка: неверный ID покупки");
+                    sent.answerCallbackQuery(answerCallbackQuery);
+                    return;
+                }
                 
                 // Находим покупку
                 PurchaseDAO purchaseDAO = new PurchaseDAO();
                 Purchase purchase = purchaseDAO.findById(purchaseId);
                 
-                if (purchase != null) {
-                    // Получаем администратора, который нажал кнопку
-                    Long adminChatId = update.getCallbackQuery().getFrom().getId();
-                    UserDAO userDAO = new UserDAO();
-                    User admin = userDAO.findById(adminChatId);
-                    
-                    if (admin != null && admin.isAdmin()) {
-                        // Инициируем процесс отклонения - передаем администратора
-                        handleReviewRejection(admin, purchaseId);
-                        
-                        // Отвечаем на callback query
-                        AnswerCallbackQuery answerCallbackQuery = new AnswerCallbackQuery();
-                        answerCallbackQuery.setCallbackQueryId(update.getCallbackQuery().getId());
-                        answerCallbackQuery.setText("❌ Отзыв отклонен. Укажите причину.");
-                        answerCallbackQuery.setShowAlert(false);
-                        
-                        Sent sent = new Sent();
-                        sent.answerCallbackQuery(answerCallbackQuery);
-                    } else {
-                        System.err.println("❌ Admin not found or not authorized: " + adminChatId);
-                    }
+                if (purchase == null) {
+                    System.err.println("❌ Purchase not found: " + purchaseId);
+                    answerCallbackQuery.setText("❌ Покупка не найдена");
+                    sent.answerCallbackQuery(answerCallbackQuery);
+                    return;
                 }
+                
+                // Получаем администратора, который нажал кнопку
+                Long adminChatId = update.getCallbackQuery().getFrom().getId();
+                UserDAO userDAO = new UserDAO();
+                User admin = userDAO.findById(adminChatId);
+                
+                if (admin == null) {
+                    System.err.println("❌ Admin not found in database: " + adminChatId);
+                    answerCallbackQuery.setText("❌ Администратор не найден в базе данных");
+                    sent.answerCallbackQuery(answerCallbackQuery);
+                    return;
+                }
+                
+                if (!admin.isAdmin()) {
+                    System.err.println("❌ User is not admin: " + adminChatId);
+                    answerCallbackQuery.setText("❌ У вас нет прав администратора");
+                    sent.answerCallbackQuery(answerCallbackQuery);
+                    return;
+                }
+                
+                // Инициируем процесс отклонения - передаем администратора
+                handleReviewRejection(admin, purchaseId);
+                
+                // Отвечаем на callback query
+                answerCallbackQuery.setText("❌ Отзыв отклонен. Укажите причину.");
+                sent.answerCallbackQuery(answerCallbackQuery);
             }
             
         } catch (Exception e) {
             System.err.println("❌ Error processing group review callback: " + e.getMessage());
             e.printStackTrace();
+            
+            // Отвечаем на callback query даже при ошибке
+            try {
+                answerCallbackQuery.setText("❌ Произошла ошибка при обработке запроса");
+                sent.answerCallbackQuery(answerCallbackQuery);
+            } catch (Exception ex) {
+                System.err.println("❌ Failed to answer callback query: " + ex.getMessage());
+            }
         }
     }
 
@@ -2236,6 +2288,17 @@ public class MessageProcessing {
                 return;
             }
             
+            // Если шаг TEXT, не принимаем медиа - просим сначала отправить текст
+            if (session.getStep() == ReviewSubmissionSession.Step.TEXT) {
+                Sent sent = new Sent();
+                String productName = (session.getPurchase().getProduct() != null && session.getPurchase().getProduct().getProductName() != null) 
+                    ? session.getPurchase().getProduct().getProductName() 
+                    : "Неизвестный товар";
+                sent.sendMessage(user, "❌ Сначала отправьте текст отзыва.\n\n" +
+                        "📝 Пожалуйста, напишите текст вашего отзыва о товаре \"" + productName + "\" 🖊");
+                return;
+            }
+            
             // Если состояние REVIEW_SUBMISSION_TEXT, меняем его на REVIEW_SUBMISSION при получении медиа
             String redisState = RedisSessionStore.getState(user.getIdUser());
             if (redisState != null && redisState.equals("REVIEW_SUBMISSION_TEXT")) {
@@ -2752,7 +2815,8 @@ public class MessageProcessing {
             return;
         }
         
-        String reviewText = update.getMessage().getText();
+        Message message = update.getMessage();
+        String reviewText = message.getText();
 
         if (reviewText == null || reviewText.trim().isEmpty()) {
             Sent sent = new Sent();
@@ -2764,13 +2828,23 @@ public class MessageProcessing {
         session.setReviewText(reviewText.trim());
         session.setStep(ReviewSubmissionSession.Step.MEDIA);
         RedisSessionStore.setReviewSubmissionSession(user.getIdUser(), session);
-
-        // Отправляем сообщение с просьбой прикрепить медиа
-        String message = "Отлично! Теперь, пожалуйста, прикрепите фотографии и/или видео товара (3 фото и 1 видео) 📷\n\n" +
-                "💡 Совет: Вы можете отправить текст и медиа в одном сообщении!";
         
-        Sent sent = new Sent();
-        sent.sendMessage(user, message);
+        // Проверяем, есть ли медиа в том же сообщении
+        boolean hasMedia = message.hasPhoto() || message.hasVideo() || 
+                          message.hasDocument() || message.hasVideoNote() ||
+                          message.hasAudio() || message.hasVoice();
+        
+        if (hasMedia) {
+            // Если есть медиа, обрабатываем его сразу после сохранения текста
+            handleReviewMedia(update, user);
+        } else {
+            // Если медиа нет, отправляем сообщение с просьбой прикрепить медиа
+            String mediaMessage = "Отлично! Теперь, пожалуйста, прикрепите фотографии и/или видео товара (3 фото и 1 видео) 📷\n\n" +
+                    "💡 Совет: Вы можете отправить текст и медиа в одном сообщении!";
+            
+            Sent sent = new Sent();
+            sent.sendMessage(user, mediaMessage);
+        }
     }
     
     /**
@@ -2914,10 +2988,23 @@ public class MessageProcessing {
         
         User reviewUser = purchase.getUser();
         
-        // Отправляем уведомление пользователю с причиной
+        // Очищаем старую сессию отзыва, если она есть
+        RedisSessionStore.removeReviewSubmissionSession(reviewUser.getIdUser());
+        
+        // Создаем новую сессию для отправки нового отзыва
+        ReviewSubmissionSession session = new ReviewSubmissionSession(purchase);
+        session.setStep(ReviewSubmissionSession.Step.TEXT);
+        RedisSessionStore.setReviewSubmissionSession(reviewUser.getIdUser(), session);
+        RedisSessionStore.setState(reviewUser.getIdUser(), "REVIEW_SUBMISSION_TEXT");
+        
+        // Отправляем уведомление пользователю с причиной и просьбой написать новый текст
+        String productName = (purchase.getProduct() != null && purchase.getProduct().getProductName() != null) 
+            ? purchase.getProduct().getProductName() 
+            : "Неизвестный товар";
         String userMessage = "❌ Ваш отзыв отклонен администратором.\n\n" +
                 "📝 Причина отказа: " + reason + "\n\n" +
-                "Пожалуйста, отправьте новый отзыв с улучшенными фотографиями и видео.";
+                "Пожалуйста, отправьте новый отзыв.\n\n" +
+                "📝 Сначала напишите текст вашего нового отзыва о товаре \"" + productName + "\" 🖊";
         
         Sent sent = new Sent();
         sent.sendMessage(reviewUser, userMessage);
