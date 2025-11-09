@@ -2795,15 +2795,28 @@ public class MessageProcessing {
         
         User reviewUser = purchase.getUser();
         
+        if (reviewUser == null) {
+            Sent sent = new Sent();
+            sent.sendMessage(admin, "❌ Пользователь не найден для покупки.");
+            return;
+        }
+        
         // Подтверждаем отзыв
         purchase.setPurchaseStage(2); // Этап: отзыв утвержден
         purchaseDAO.update(purchase);
         
         // Отправляем уведомление пользователю
-        String message = "✅ Ваш отзыв утвержден администратором.\n\nПосле его публикации на WB нажмите кнопку «💸 Получить кешбек»";
+        String message = "✅ Ваш отзыв утвержден администратором.\n\n" +
+                        "После его публикации на Wildberries нажмите кнопку «💸 Получить кешбек»";
         
         Sent sent = new Sent();
-        sent.sendMessage(reviewUser, message);
+        try {
+            sent.sendMessage(reviewUser, message);
+            System.out.println("✅ Сообщение о подтверждении отзыва отправлено пользователю: " + reviewUser.getUsername());
+        } catch (Exception e) {
+            System.err.println("❌ Ошибка при отправке сообщения пользователю: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
     
     /**
