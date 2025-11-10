@@ -2750,18 +2750,17 @@ public class MessageProcessing {
                 "📦 Товар: " + purchase.getProduct().getProductName() + "\n" +
                 "💰 Размер кешбека: " + purchase.getProduct().getCashbackPercentage() + "%\n\n" +
                 "Для получения кешбека:\n" +
-                "1️⃣ Введите номер карты для получения кешбека\n" +
-                "2️⃣ Отправьте скриншот вашего опубликованного отзыва\n" +
-                "3️⃣ Дождитесь одобрения администратором\n" +
-                "4️⃣ Получите кешбек на указанную карту\n\n" +
-                "💳 Введите номер карты (16 цифр):";
+                "1️⃣ Отправьте скриншот вашего опубликованного отзыва\n" +
+                "2️⃣ Дождитесь одобрения администратором\n" +
+                "3️⃣ Получите кешбек на указанную карту\n\n" +
+                "📸 Отправьте скриншот вашего опубликованного отзыва::";
         
         // Создаем сессию кешбека
         CashbackSession cashbackSession = new CashbackSession(purchase);
         RedisSessionStore.setCashbackSession(user.getIdUser(), cashbackSession);
         
         // Устанавливаем состояние для ввода номера карты
-        RedisSessionStore.setState(user.getIdUser(), "CASHBACK_CARD_INPUT_" + purchaseId);
+        RedisSessionStore.setState(user.getIdUser(), "CASHBACK_SCREENSHOT_" + purchaseId);
         
         Sent sent = new Sent();
         sent.sendMessage(user, instruction);
@@ -3120,11 +3119,11 @@ public class MessageProcessing {
         cashbackSession.setScreenshotFileId(fileId);
         cashbackSession.setScreenshotMessageId(messageId);
         RedisSessionStore.setCashbackSession(chatId, cashbackSession);
-        
+
         // Сохраняем номер карты в покупке
         PurchaseDAO purchaseDAO = new PurchaseDAO();
-        purchase.setCardNumber(cashbackSession.getCardNumber());
-        purchaseDAO.update(purchase);
+//        purchase.setCardNumber(cashbackSession.getCardNumber());
+//        purchaseDAO.update(purchase);
         
         // Асинхронная обработка скриншота отзыва (без скачивания)
         AsyncService.processCashbackScreenshotAsync(purchase, user, photo, fileId)
@@ -3137,7 +3136,7 @@ public class MessageProcessing {
                 String finishText = "✅ Скриншот отзыва принят!\n\n" +
                         "📦 Товар: " + purchase.getProduct().getProductName() + "\n" +
                         "💰 Кешбек: " + purchase.getProduct().getCashbackPercentage() + "%\n" +
-                        "💳 Карта: <code>" + cashbackSession.getCardNumber() + "</code>\n\n" +
+                        "💳 Карта: <code>" + purchase.getCardNumber() + "</code>\n\n" +
                         "Ваш запрос на кешбек отправлен администратору на рассмотрение.\n" +
                         "После одобрения кешбек будет переведен на указанную карту.\n\n" +
                         "Спасибо за участие! 🎉";
@@ -3165,8 +3164,10 @@ public class MessageProcessing {
                     String text = "💸 Пользователь @" + user.getUsername() + " запросил кешбек!\n\n" +
                             "📦 Товар: " + purchase.getProduct().getProductName() + "\n" +
                             payoutText +
+                            "💳 Карта: <code>" + purchase.getCardNumber() + "</code>\n" +
                             "📅 Дата покупки: " + purchase.getDate() + "\n\n" +
                             "📸 Скриншот отзыва прикреплен ниже";
+
                     
                     // Создаем кнопку "Оплачено"
                     List<List<InlineKeyboardButton>> rows = new ArrayList<>();
