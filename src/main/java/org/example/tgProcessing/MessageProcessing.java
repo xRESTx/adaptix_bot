@@ -30,6 +30,7 @@ import org.telegram.telegrambots.meta.api.objects.PhotoSize;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.Video;
 import org.telegram.telegrambots.meta.api.objects.VideoNote;
+import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageReplyMarkup;
@@ -391,7 +392,18 @@ public class MessageProcessing {
                                 int numberParticipants = Integer.parseInt(msg);
                                 session.getProduct().setNumberParticipants(numberParticipants);
                                 session.setStep(ProductCreationSession.Step.ADDITIONAL_CONDITIONS);
-                                createTelegramBot.sendMessage(user, "Введите дополнительные условия:");
+                                
+                                InlineKeyboardButton skipButton = new InlineKeyboardButton();
+                                skipButton.setText("Пропустить");
+                                skipButton.setCallbackData("skip_additional_conditions");
+
+                                InlineKeyboardMarkup keyboardMarkup = new InlineKeyboardMarkup();
+                                keyboardMarkup.setKeyboard(List.of(List.of(skipButton)));
+
+                                SendMessage additionalConditionsMessage = new SendMessage();
+                                additionalConditionsMessage.setReplyMarkup(keyboardMarkup);
+
+                                createTelegramBot.sendMessage(user, "Введите дополнительные условия:", additionalConditionsMessage);
                             } catch (NumberFormatException e) {
                                 createTelegramBot.sendMessage(user, "Некорректное количество участников. Пожалуйста, введите число.");
                             }
@@ -476,7 +488,8 @@ public class MessageProcessing {
 
                         case CARD_NUMBER:
                             // можно добавить лёгкую валидацию, если нужно
-                            session.getRequest().setCardNumber(msg);
+                            String rawCardNumber = msg != null ? msg.replaceAll("\\s+", "") : null;
+                            session.getRequest().setCardNumber(rawCardNumber);
                             session.setStep(ReviewRequestSession.Step.PURCHASE_AMOUNT);
                             RedisSessionStore.setReviewSession(chatId, session);
                             updateReservationActivity(user, session);
@@ -1008,6 +1021,28 @@ public class MessageProcessing {
             ProductDAO productDAO = new ProductDAO();
             Product selected = productDAO.findById(Integer.parseInt(parts[1]));
             logicUI.sentOneProduct(user,selected, Integer.parseInt(parts[2]));
+        } else if ("skip_additional_conditions".equals(data)) {
+            ProductCreationSession session = RedisSessionStore.getProductSession(chatId);
+            Sent sent = new Sent();
+
+            AnswerCallbackQuery answerCallbackQuery = new AnswerCallbackQuery();
+            answerCallbackQuery.setCallbackQueryId(update.getCallbackQuery().getId());
+            answerCallbackQuery.setShowAlert(false);
+
+            if (session != null && session.getStep() == ProductCreationSession.Step.ADDITIONAL_CONDITIONS) {
+                session.getProduct().setAdditionalСonditions("");
+                session.setStep(ProductCreationSession.Step.PHOTO);
+                RedisSessionStore.setProductSession(chatId, session);
+
+                answerCallbackQuery.setText("Пропущено");
+                sent.answerCallbackQuery(answerCallbackQuery);
+                safeDeleteMessage(user.getIdUser(), messageId);
+                sent.sendMessage(user, "Отправьте фотографию товара:");
+            } else {
+                answerCallbackQuery.setText("Этот шаг уже завершен.");
+                sent.answerCallbackQuery(answerCallbackQuery);
+            }
+            return;
         } else if (data.startsWith("changeVisible_")) {
             int productId = Integer.parseInt(data.substring("changeVisible_".length()));
             ProductDAO productDAO = new ProductDAO();
@@ -1563,6 +1598,11 @@ public class MessageProcessing {
                     "- Качественные фотографии в отзыве обязательны📸\n" +
                     "- Отзыв нужно оставить не позднее 3 дней после забора товара с ПВЗ 📅\n" +
                     "- Желающие возвращать товар на ПВЗ не могут участвовать в акции 🚫";
+
+            String additionalConditions = product.getAdditionalСonditions();
+            if (additionalConditions != null && !additionalConditions.trim().isEmpty()) {
+                productText += "\n\nДополнительные условия:\n" + escapeHtml(additionalConditions.trim());
+            }
             
             // Отправляем сообщение с фотографией в группу через TelegramBot
             TelegramBot telegramBot = new TelegramBot();
@@ -2753,7 +2793,7 @@ public class MessageProcessing {
                 "1️⃣ Отправьте скриншот вашего опубликованного отзыва\n" +
                 "2️⃣ Дождитесь одобрения администратором\n" +
                 "3️⃣ Получите кешбек на указанную карту\n\n" +
-                "📸 Отправьте скриншот вашего опубликованного отзыва::";
+                "📸 Отправьте скриншот вашего опубликованного отзыва:";
         
         // Создаем сессию кешбека
         CashbackSession cashbackSession = new CashbackSession(purchase);
@@ -3122,8 +3162,10 @@ public class MessageProcessing {
 
         // Сохраняем номер карты в покупке
         PurchaseDAO purchaseDAO = new PurchaseDAO();
-//        purchase.setCardNumber(cashbackSession.getCardNumber());
-//        purchaseDAO.update(purchase);
+        if (cashbackSession.getCardNumber() != null && !cashbackSession.getCardNumber().isEmpty()) {
+            purchase.setCardNumber(cashbackSession.getCardNumber());
+            purchaseDAO.update(purchase);
+        }
         
         // Асинхронная обработка скриншота отзыва (без скачивания)
         AsyncService.processCashbackScreenshotAsync(purchase, user, photo, fileId)

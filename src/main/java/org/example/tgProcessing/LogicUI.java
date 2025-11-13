@@ -670,28 +670,35 @@ public class LogicUI {
         
         // Fallback: если нет ID сообщения в группе или произошла ошибка
 
-        String textProduct =
-                "Вы выбрали товар: "+ selected.getProductName() + " \n" +
-                        "\n" +
-                        "Кешбек " + selected.getCashbackPercentage() +  "% после публикации отзыва \uD83D\uDE4F\n" +
-                        "Принимаем только карты Сбера (Россия)\n" +
-                        "\n" +
-                        "Условия участия:\n" +
-                        "- Подпишитесь на наш канал @adaptix_focus \uD83D\uDE09\n" +
-                        "- Сделайте скриншот поисковой строки (мы его можем запросить)\n" +
-                        "- Найдите наш товар по запросу \""+ selected.getKeyQuery() +"\" \uD83D\uDD0E\n" +
-                        "- Закажите товар и заполните заявку\n" +
-                        "- Заберите товар с ПВЗ в течении 3 дней\uD83D\uDC4D\n" +
-                        "- Согласуйте свой отзыв с фотографиями в нашем боте\n" +
-                        "- Оставьте свой отзыв и заполните форму получения кешбека (только когда отзыв опубликовали)\n" +
-                        "- Кешбек ВЫПЛАЧИВАЕТСЯ В ПН И ПТ\uD83D\uDCB3\n" +
-                        "\n" +
-                        "Важно:\n" +
-                        "- Участвовать можно только в одной раздаче на один аккаунт не чаще чем раз в две недели\n" +
-                        "- ФИО в заказе должно совпадать с номером карты\uD83D\uDC64\n" +
-                        "- Качественные фотографии в отзыве обязательны\uD83D\uDCF8\n" +
-                        "- Отзыв нужно оставить не позднее 3 дней после забора товара с ПВЗ \uD83D\uDCC5\n" +
-                        "- Желающие возвращать товар на ПВЗ не могут участвовать в акции \uD83D\uDEAB";
+        StringBuilder textProductBuilder = new StringBuilder()
+                .append("Вы выбрали товар: ").append(selected.getProductName()).append(" \n")
+                .append("\n")
+                .append("Кешбек ").append(selected.getCashbackPercentage()).append("% после публикации отзыва \uD83D\uDE4F\n")
+                .append("Принимаем только карты Сбера (Россия)\n")
+                .append("\n")
+                .append("Условия участия:\n")
+                .append("- Подпишитесь на наш канал @adaptix_focus \uD83D\uDE09\n")
+                .append("- Сделайте скриншот поисковой строки (мы его можем запросить)\n")
+                .append("- Найдите наш товар по запросу \"").append(selected.getKeyQuery()).append("\" \uD83D\uDD0E\n")
+                .append("- Закажите товар и заполните заявку\n")
+                .append("- Заберите товар с ПВЗ в течении 3 дней\uD83D\uDC4D\n")
+                .append("- Согласуйте свой отзыв с фотографиями в нашем боте\n")
+                .append("- Оставьте свой отзыв и заполните форму получения кешбека (только когда отзыв опубликовали)\n")
+                .append("- Кешбек ВЫПЛАЧИВАЕТСЯ В ПН И ПТ\uD83D\uDCB3\n")
+                .append("\n")
+                .append("Важно:\n")
+                .append("- Участвовать можно только в одной раздаче на один аккаунт не чаще чем раз в две недели\n")
+                .append("- ФИО в заказе должно совпадать с номером карты\uD83D\uDC64\n")
+                .append("- Качественные фотографии в отзыве обязательны\uD83D\uDCF8\n")
+                .append("- Отзыв нужно оставить не позднее 3 дней после забора товара с ПВЗ \uD83D\uDCC5\n")
+                .append("- Желающие возвращать товар на ПВЗ не могут участвовать в акции \uD83D\uDEAB");
+
+        String additionalConditions = selected.getAdditionalСonditions();
+        if (additionalConditions != null && !additionalConditions.trim().isEmpty()) {
+            textProductBuilder.append("\n\nДополнительные условия:\n").append(additionalConditions.trim());
+        }
+
+        String textProduct = textProductBuilder.toString();
 
         // Проверяем существование файла фотографии
         File photoFile = new File(selected.getPhoto());

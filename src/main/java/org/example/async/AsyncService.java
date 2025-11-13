@@ -304,6 +304,13 @@ public class AsyncService {
                     }
                 } catch (NumberFormatException ignore) {}
 
+                if (session.getRequest() != null && session.getRequest().getCardNumber() != null) {
+                    String cardNumber = session.getRequest().getCardNumber().replaceAll("\\s+", "");
+                    if (!cardNumber.isEmpty()) {
+                        purchase.setCardNumber(cardNumber);
+                    }
+                }
+
                 PurchaseDAO purchaseDAO = new PurchaseDAO();
                 purchaseDAO.save(purchase);
                 
