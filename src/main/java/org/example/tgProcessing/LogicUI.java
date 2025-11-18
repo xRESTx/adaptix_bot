@@ -1137,14 +1137,29 @@ public class LogicUI {
      * Показать список товаров с кнопками редактирования
      */
     public void showProductsListWithEditButtons(User admin) {
+        showProductsListWithEditButtons(admin, 1);
+    }
+    
+    /**
+     * Показать список товаров с кнопками редактирования (с пагинацией)
+     */
+    public void showProductsListWithEditButtons(User admin, int page) {
+        showProductsListWithEditButtons(admin, page, null);
+    }
+    
+    /**
+     * Показать список товаров с кнопками редактирования (с пагинацией)
+     * Если messageId указан, используется editMessage вместо sendMessage
+     */
+    public void showProductsListWithEditButtons(User admin, int page, Integer messageId) {
         long startTime = System.currentTimeMillis();
         
         ProductDAO productDAO = new ProductDAO();
         long productsLoadStart = System.currentTimeMillis();
-        List<Product> products = productDAO.findAll();
+        List<Product> allProducts = productDAO.findAll();
         long productsLoadEnd = System.currentTimeMillis();
 
-        if (products.isEmpty()) {
+        if (allProducts.isEmpty()) {
             // Показываем сообщение с кнопкой "Назад" даже если товаров нет
             InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
             List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
@@ -1157,13 +1172,34 @@ public class LogicUI {
             rows.add(List.of(backButton));
             keyboard.setKeyboard(rows);
             
-            SendMessage message = new SendMessage();
-            message.setReplyMarkup(keyboard);
-            
             Sent sent = new Sent();
-            sent.sendMessage(admin, "📦 Список товаров пуст", message);
+            if (messageId != null) {
+                EditMessageReplyMarkup editMarkup = new EditMessageReplyMarkup();
+                editMarkup.setChatId(String.valueOf(admin.getIdUser()));
+                editMarkup.setMessageId(messageId);
+                editMarkup.setReplyMarkup(keyboard);
+                
+                sent.editMessageMarkup(admin, messageId, "📦 Список товаров пуст", editMarkup);
+            } else {
+                SendMessage message = new SendMessage();
+                message.setReplyMarkup(keyboard);
+                sent.sendMessage(admin, "📦 Список товаров пуст", message);
+            }
             return;
         }
+        
+        // Пагинация: по 10 товаров на страницу
+        int itemsPerPage = 10;
+        int totalPages = (int) Math.ceil((double) allProducts.size() / itemsPerPage);
+        
+        // Проверяем, что страница в допустимых пределах
+        if (page < 1) page = 1;
+        if (page > totalPages) page = totalPages;
+        
+        // Вычисляем индексы для текущей страницы
+        int startIndex = (page - 1) * itemsPerPage;
+        int endIndex = Math.min(startIndex + itemsPerPage, allProducts.size());
+        List<Product> products = allProducts.subList(startIndex, endIndex);
         
         InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
         List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
@@ -1173,30 +1209,82 @@ public class LogicUI {
             InlineKeyboardButton productButton = new InlineKeyboardButton();
             String visibilityIcon = product.isVisible() ? "👁️" : "🙈";
             productButton.setText(visibilityIcon + " " + product.getProductName() + " (ID: " + product.getIdProduct() + ")");
-            productButton.setCallbackData("admin_product_" + product.getIdProduct());
+            productButton.setCallbackData("admin_product_" + product.getIdProduct() + "_page_" + page);
             
             // Кнопка редактирования товара (меньше)
             InlineKeyboardButton editButton = new InlineKeyboardButton();
             editButton.setText("✏️");
-            editButton.setCallbackData("admin_edit_product_" + product.getIdProduct());
+            editButton.setCallbackData("admin_edit_product_" + product.getIdProduct() + "_page_" + page);
             
             // Размещаем кнопки в одной строке
             rows.add(List.of(productButton, editButton));
         }
         
-        // Кнопка "Назад в админ-меню"
+        // Кнопки навигации
+        List<InlineKeyboardButton> navigationRow = new java.util.ArrayList<>();
+        
+        // Стрелка назад или крестик (если на первой странице)
+        if (page > 1) {
+            InlineKeyboardButton prevButton = new InlineKeyboardButton();
+            prevButton.setText("◀️");
+            prevButton.setCallbackData("admin_products_page_" + (page - 1));
+            navigationRow.add(prevButton);
+        } else {
+            // Показываем крестик вместо стрелки на первой странице
+            InlineKeyboardButton disabledButton = new InlineKeyboardButton();
+            disabledButton.setText("❌");
+            disabledButton.setCallbackData("admin_products_page_" + page); // Остаемся на той же странице
+            navigationRow.add(disabledButton);
+        }
+        
+        // Кнопка с номером страницы (при нажатии переходит на первую страницу)
+        InlineKeyboardButton pageButton = new InlineKeyboardButton();
+        pageButton.setText(page + " из " + totalPages);
+        pageButton.setCallbackData("admin_products_page_1"); // Переходим на первую страницу
+        navigationRow.add(pageButton);
+        
+        // Стрелка вперед или крестик (если на последней странице)
+        if (page < totalPages) {
+            InlineKeyboardButton nextButton = new InlineKeyboardButton();
+            nextButton.setText("▶️");
+            nextButton.setCallbackData("admin_products_page_" + (page + 1));
+            navigationRow.add(nextButton);
+        } else {
+            // Показываем крестик вместо стрелки на последней странице
+            InlineKeyboardButton disabledButton = new InlineKeyboardButton();
+            disabledButton.setText("❌");
+            disabledButton.setCallbackData("admin_products_page_" + page); // Остаемся на той же странице
+            navigationRow.add(disabledButton);
+        }
+        
+        rows.add(navigationRow);
+        
+        // Кнопка "Назад в админ-меню" на отдельной строке
         InlineKeyboardButton backButton = new InlineKeyboardButton();
-        backButton.setText("⬅️ Назад в админ-меню");
+        backButton.setText("⬅️ Назад");
         backButton.setCallbackData("admin_back_to_menu");
         rows.add(List.of(backButton));
         
         keyboard.setKeyboard(rows);
         
-        SendMessage message = new SendMessage();
-        message.setReplyMarkup(keyboard);
+        String messageText = "📦 Выберите товар для просмотра покупок или редактирования:";
         
         Sent sent = new Sent();
-        sent.sendMessage(admin, "📦 Выберите товар для просмотра покупок или редактирования:", message);
+        
+        if (messageId != null) {
+            // Используем editMessage для обновления существующего сообщения
+            EditMessageReplyMarkup editMarkup = new EditMessageReplyMarkup();
+            editMarkup.setChatId(String.valueOf(admin.getIdUser()));
+            editMarkup.setMessageId(messageId);
+            editMarkup.setReplyMarkup(keyboard);
+            
+            sent.editMessageMarkup(admin, messageId, messageText, editMarkup);
+        } else {
+            // Используем sendMessage для нового сообщения
+            SendMessage message = new SendMessage();
+            message.setReplyMarkup(keyboard);
+            sent.sendMessage(admin, messageText, message);
+        }
         
         long endTime = System.currentTimeMillis();
     }
@@ -1300,6 +1388,13 @@ public class LogicUI {
      * Показать список пользователей, купивших товар
      */
     public void showProductPurchases(User admin, int productId) {
+        showProductPurchases(admin, productId, 1);
+    }
+    
+    /**
+     * Показать список пользователей, купивших товар (с сохранением номера страницы)
+     */
+    public void showProductPurchases(User admin, int productId, int page) {
 
         long startTime = System.currentTimeMillis();
         
@@ -1315,10 +1410,10 @@ public class LogicUI {
             InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
             List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
             
-            // Кнопка "Назад"
+            // Кнопка "Назад" с сохранением номера страницы
             InlineKeyboardButton backButton = new InlineKeyboardButton();
             backButton.setText("⬅️ Назад к товарам");
-            backButton.setCallbackData("admin_back_to_products");
+            backButton.setCallbackData("admin_back_to_products_page_" + page);
             
             rows.add(List.of(backButton));
             keyboard.setKeyboard(rows);
@@ -1340,10 +1435,10 @@ public class LogicUI {
             InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
             List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
             
-            // Кнопка "Назад"
+            // Кнопка "Назад" с сохранением номера страницы
             InlineKeyboardButton backButton = new InlineKeyboardButton();
             backButton.setText("⬅️ Назад к товарам");
-            backButton.setCallbackData("admin_back_to_products");
+            backButton.setCallbackData("admin_back_to_products_page_" + page);
             
             rows.add(List.of(backButton));
             keyboard.setKeyboard(rows);
@@ -1376,10 +1471,10 @@ public class LogicUI {
             }
         }
         
-        // Кнопка "Назад"
+        // Кнопка "Назад" с сохранением номера страницы
         InlineKeyboardButton backButton = new InlineKeyboardButton();
         backButton.setText("⬅️ Назад к товарам");
-        backButton.setCallbackData("admin_back_to_products");
+        backButton.setCallbackData("admin_back_to_products_page_" + page);
         
         rows.add(List.of(backButton));
         
@@ -1799,6 +1894,13 @@ public class LogicUI {
      * Показать меню редактирования товара
      */
     public void showEditProductMenu(User admin, int productId) {
+        showEditProductMenu(admin, productId, 1);
+    }
+    
+    /**
+     * Показать меню редактирования товара (с сохранением номера страницы)
+     */
+    public void showEditProductMenu(User admin, int productId, int page) {
         ProductDAO productDAO = new ProductDAO();
         Product product = productDAO.findById(productId);
 
@@ -1821,46 +1923,16 @@ public class LogicUI {
         InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
         List<List<InlineKeyboardButton>> rows = new java.util.ArrayList<>();
         
-        // Кнопки редактирования
-        InlineKeyboardButton nameButton = new InlineKeyboardButton();
-        nameButton.setText("📦 Название");
-        nameButton.setCallbackData("admin_edit_product_name_" + productId);
-        
-        InlineKeyboardButton articulButton = new InlineKeyboardButton();
-        articulButton.setText("🔢 Артикул");
-        articulButton.setCallbackData("admin_edit_product_articul_" + productId);
-        
-        InlineKeyboardButton cashbackButton = new InlineKeyboardButton();
-        cashbackButton.setText("💰 Кэшбэк");
-        cashbackButton.setCallbackData("admin_edit_product_cashback_" + productId);
-        
-        InlineKeyboardButton queryButton = new InlineKeyboardButton();
-        queryButton.setText("🔍 Ключевой запрос");
-        queryButton.setCallbackData("admin_edit_product_query_" + productId);
-        
-        InlineKeyboardButton conditionsButton = new InlineKeyboardButton();
-        conditionsButton.setText("📝 Условия");
-        conditionsButton.setCallbackData("admin_edit_product_conditions_" + productId);
-        
-        InlineKeyboardButton photoButton = new InlineKeyboardButton();
-        photoButton.setText("📷 Фотография");
-        photoButton.setCallbackData("admin_edit_product_photo_" + productId);
-        
+        // Кнопка видимости
         InlineKeyboardButton visibilityButton = new InlineKeyboardButton();
         visibilityButton.setText("👁️ Видимость");
-        visibilityButton.setCallbackData("admin_edit_product_visibility_" + productId);
+        visibilityButton.setCallbackData("admin_edit_product_visibility_" + productId + "_page_" + page);
         
-        // Кнопка "Назад"
+        // Кнопка "Назад" с сохранением номера страницы
         InlineKeyboardButton backButton = new InlineKeyboardButton();
         backButton.setText("⬅️ Назад к товарам");
-        backButton.setCallbackData("admin_back_to_products");
+        backButton.setCallbackData("admin_back_to_products_page_" + page);
         
-        rows.add(List.of(nameButton));
-        rows.add(List.of(articulButton));
-        rows.add(List.of(cashbackButton));
-        rows.add(List.of(queryButton));
-        rows.add(List.of(conditionsButton));
-        rows.add(List.of(photoButton));
         rows.add(List.of(visibilityButton));
         rows.add(List.of(backButton));
         

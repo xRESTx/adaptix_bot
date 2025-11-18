@@ -1010,7 +1010,8 @@ public class MessageProcessing {
             data.startsWith("admin_edit_product_articul_") || data.startsWith("admin_edit_product_cashback_") ||
             data.startsWith("admin_edit_product_query_") || data.startsWith("admin_edit_product_conditions_") ||
             data.startsWith("admin_edit_product_photo_") || data.startsWith("admin_edit_product_visibility_") ||
-            data.startsWith("admin_view_stage_")) {
+            data.startsWith("admin_view_stage_") || data.startsWith("admin_products_page_") || 
+            data.startsWith("admin_back_to_products_page_")) {
             handleCallbackQuery(update, user);
             return;
         }
@@ -1351,12 +1352,29 @@ public class MessageProcessing {
                 logicUI.showProductsList(user);
             }
             default -> {
-                if (callbackData.startsWith("admin_product_")) {
-                    int productId = Integer.parseInt(callbackData.substring("admin_product_".length()));
-
+                if (callbackData.startsWith("admin_products_page_")) {
+                    int page = Integer.parseInt(callbackData.substring("admin_products_page_".length()));
+                    logicUI.showProductsListWithEditButtons(user, page, messageId);
+                } else if (callbackData.startsWith("admin_back_to_products_page_")) {
+                    int page = Integer.parseInt(callbackData.substring("admin_back_to_products_page_".length()));
+                    safeDeleteMessage(user.getIdUser(), messageId);
+                    logicUI.showProductsListWithEditButtons(user, page);
+                } else if (callbackData.startsWith("admin_product_")) {
+                    // Формат: admin_product_<productId>_page_<page> или admin_product_<productId>
+                    String productPart = callbackData.substring("admin_product_".length());
+                    int productId;
+                    int page = 1;
+                    
+                    if (productPart.contains("_page_")) {
+                        String[] parts = productPart.split("_page_");
+                        productId = Integer.parseInt(parts[0]);
+                        page = Integer.parseInt(parts[1]);
+                    } else {
+                        productId = Integer.parseInt(productPart);
+                    }
                     TelegramBot telegramBot = new TelegramBot();
                     telegramBot.deleteMessage(user.getIdUser(), messageId);
-                    logicUI.showProductPurchases(user, productId);
+                    logicUI.showProductPurchases(user, productId, page);
 
                 } else if (callbackData.startsWith("admin_user_")) {
                     int purchaseId = Integer.parseInt(callbackData.substring("admin_user_".length()));
@@ -1395,13 +1413,36 @@ public class MessageProcessing {
                     int productId = Integer.parseInt(callbackData.substring("admin_edit_product_photo_".length()));
                     startProductPhotoEdit(user, productId);
                 } else if (callbackData.startsWith("admin_edit_product_visibility_")) {
-                    int productId = Integer.parseInt(callbackData.substring("admin_edit_product_visibility_".length()));
-                    toggleProductVisibility(user, productId);
+                    // Формат: admin_edit_product_visibility_<productId>_page_<page> или admin_edit_product_visibility_<productId>
+                    String visibilityPart = callbackData.substring("admin_edit_product_visibility_".length());
+                    int productId;
+                    int page = 1;
+                    
+                    if (visibilityPart.contains("_page_")) {
+                        String[] parts = visibilityPart.split("_page_");
+                        productId = Integer.parseInt(parts[0]);
+                        page = Integer.parseInt(parts[1]);
+                    } else {
+                        productId = Integer.parseInt(visibilityPart);
+                    }
+                    toggleProductVisibility(user, productId, page);
                 } else if (callbackData.startsWith("admin_edit_product_")) {
-                    int productId = Integer.parseInt(callbackData.substring("admin_edit_product_".length()));
+                    // Формат: admin_edit_product_<productId>_page_<page> или admin_edit_product_<productId>
+                    String editPart = callbackData.substring("admin_edit_product_".length());
+                    int productId;
+                    int page = 1;
+                    
+                    if (editPart.contains("_page_")) {
+                        String[] parts = editPart.split("_page_");
+                        productId = Integer.parseInt(parts[0]);
+                        page = Integer.parseInt(parts[1]);
+                    } else {
+                        productId = Integer.parseInt(editPart);
+                    }
+                    
                     TelegramBot telegramBot = new TelegramBot();
                     telegramBot.deleteMessage(user.getIdUser(), messageId);
-                    logicUI.showEditProductMenu(user, productId);
+                    logicUI.showEditProductMenu(user, productId, page);
                 } else if (callbackData.startsWith("admin_view_stage_")) {
                     handleViewStage(user, callbackData);
                 } else if (callbackData.equals("no_message_available")) {
@@ -1894,6 +1935,10 @@ public class MessageProcessing {
      * Переключить видимость товара
      */
     private void toggleProductVisibility(User admin, int productId) {
+        toggleProductVisibility(admin, productId, 1);
+    }
+    
+    private void toggleProductVisibility(User admin, int productId, int page) {
         ProductDAO productDAO = new ProductDAO();
         Product product = productDAO.findById(productId);
         
@@ -1911,9 +1956,9 @@ public class MessageProcessing {
         Sent sent = new Sent();
         sent.sendMessage(admin, "✅ Товар \"" + product.getProductName() + "\" теперь " + status);
         
-        // Показываем обновленное меню редактирования
+        // Показываем обновленное меню редактирования с сохранением номера страницы
         LogicUI logicUI = new LogicUI();
-        logicUI.showEditProductMenu(admin, productId);
+        logicUI.showEditProductMenu(admin, productId, page);
     }
     
     /**

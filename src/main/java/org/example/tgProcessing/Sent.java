@@ -252,6 +252,12 @@ public class Sent {
         try {
             telegramBot.execute(editText);
         } catch (TelegramApiException e) {
+            // Игнорируем ошибку "message is not modified" - это нормальная ситуация,
+            // когда содержимое сообщения не изменилось
+            if (e.getMessage() != null && e.getMessage().contains("message is not modified")) {
+                // Это нормальная ситуация, не логируем как ошибку
+                return;
+            }
             System.err.println("❌ Ошибка при обновлении текста и клавиатуры: " + e.getMessage());
         }
     }

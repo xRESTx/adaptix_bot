@@ -35,7 +35,7 @@ public class ProductDAO {
 
     public List<Product> findAll() {
         try (Session session = sessionFactory.openSession()) {
-            List<Product> products = session.createQuery("FROM Product", Product.class).list();
+            List<Product> products = session.createQuery("FROM Product ORDER BY idProduct DESC", Product.class).list();
              return products;
         }
     }
