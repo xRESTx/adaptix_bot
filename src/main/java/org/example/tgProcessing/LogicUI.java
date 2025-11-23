@@ -1208,7 +1208,7 @@ public class LogicUI {
             // Кнопка товара с индикатором видимости
             InlineKeyboardButton productButton = new InlineKeyboardButton();
             String visibilityIcon = product.isVisible() ? "👁️" : "🙈";
-            productButton.setText(visibilityIcon + " " + product.getProductName() + " (ID: " + product.getIdProduct() + ")");
+            productButton.setText(visibilityIcon  + " " + product.getIdProduct() + " " + product.getProductName());
             productButton.setCallbackData("admin_product_" + product.getIdProduct() + "_page_" + page);
             
             // Кнопка редактирования товара (меньше)
